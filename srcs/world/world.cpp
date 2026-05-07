@@ -217,6 +217,25 @@ Chunk* World::registerChunk(std::unique_ptr<Chunk> chunk) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// unregisterChunk() — チャンクを World から取り除き、関連する水シミュレーション
+// 状態を掃除する。ChunkManager が GPU メッシュを破棄した直後に呼ぶこと。
+// ─────────────────────────────────────────────────────────────────────────────
+void World::unregisterChunk(ChunkPos pos) {
+    // このチャンクに属する flowing_water_ エントリを除去する。
+    // 残したままでも動作上は問題ないが、解放済み座標を蓄積しないようクリーンアップする。
+    const int base_wx = pos.x * CHUNK_SIZE_X;
+    const int base_wz = pos.z * CHUNK_SIZE_Z;
+    for (auto it = flowing_water_.begin(); it != flowing_water_.end(); ) {
+        if (it->first.x >= base_wx && it->first.x < base_wx + CHUNK_SIZE_X &&
+            it->first.z >= base_wz && it->first.z < base_wz + CHUNK_SIZE_Z)
+            it = flowing_water_.erase(it);
+        else
+            ++it;
+    }
+    chunks_.erase(pos);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // getOrCreateChunk() — チャンクを取得し、なければ生成して追加する
 //
 // 地形生成（TerrainGen::generate）は初回アクセス時だけ実行され、

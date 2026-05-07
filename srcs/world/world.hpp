@@ -13,6 +13,7 @@ public:
     Chunk* getOrCreateChunk(ChunkPos pos) override;
     Chunk* getChunk(ChunkPos pos) override;
     Chunk* registerChunk(std::unique_ptr<Chunk> chunk) override;
+    void   unregisterChunk(ChunkPos pos) override;
     void   setSeed(uint32_t seed) override;
     uint32_t getSeed() const override { return seed_; }
 

@@ -107,6 +107,7 @@ void ChunkManager::drainTerrainDone() {
         auto evicted = loaded_.put(pos, raw);
         for (const ChunkPos& ep : evicted) {
             if (Chunk* dead = world_.getChunk(ep)) renderer_.destroyChunkMesh(dead);
+            world_.unregisterChunk(ep);
         }
 
         // 新チャンク自身と隣接チャンクをメッシュ再構築対象に追加
@@ -219,6 +220,7 @@ void ChunkManager::loadRadius(ChunkPos center) {
                 auto evicted = loaded_.put(p, existing);
                 for (const ChunkPos& ep : evicted) {
                     if (Chunk* dead = world_.getChunk(ep)) renderer_.destroyChunkMesh(dead);
+                    world_.unregisterChunk(ep);
                 }
                 mesh_queue_.insert(p);
                 continue;
@@ -274,6 +276,7 @@ void ChunkManager::evictIfOverBudget() {
         Chunk*   chunk = nullptr;
         if (!loaded_.evictLRU(key, chunk)) break;
         if (chunk) renderer_.destroyChunkMesh(chunk);
+        world_.unregisterChunk(key);
     }
 }
 
