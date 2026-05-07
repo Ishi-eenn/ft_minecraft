@@ -148,6 +148,7 @@ struct Engine::Impl {
 
     BlockType selected_block = BlockType::Stone;  // 現在選択中のブロック種類
     float     time_of_day    = 0.35f;  // 時刻（0=深夜, 0.25=日の出, 0.5=正午, 0.75=日の入り）
+    bool      show_minimap   = true;   // M キーでオン/オフ
 
     ~Impl() { delete chunk_mgr; }
 };
@@ -354,6 +355,10 @@ void Engine::run() {
         {
             InputHandler& inp = impl_->player.input();
 
+            // M キーでミニマップ表示をトグル
+            if (inp.wasJustPressed(GLFW_KEY_M))
+                impl_->show_minimap = !impl_->show_minimap;
+
             // キー 1〜6 で設置ブロックを切り替え
             for (int k = GLFW_KEY_1; k <= GLFW_KEY_6; ++k) {
                 if (inp.isHeld(k)) {
@@ -459,10 +464,12 @@ void Engine::run() {
                                 (int)std::floor(ppos.y),
                                 (int)std::floor(ppos.z));
 
-        // ミニマップ（左上）を更新して描画
-        impl_->renderer.updateMinimap(impl_->world, ppos.x, ppos.z,
-                                      impl_->player.camera().getYaw(), dt);
-        impl_->renderer.drawMinimap();
+        // ミニマップ（左上）を更新して描画（M キーでオン/オフ）
+        if (impl_->show_minimap) {
+            impl_->renderer.updateMinimap(impl_->world, ppos.x, ppos.z,
+                                          impl_->player.camera().getYaw(), dt);
+            impl_->renderer.drawMinimap();
+        }
 
         // 描画したバッファを画面に表示する（ダブルバッファリング）
         impl_->renderer.endFrame();

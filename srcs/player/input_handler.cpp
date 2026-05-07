@@ -73,12 +73,18 @@ void InputHandler::newFrame() {
     dy_ = 0.0f;
     left_clicked_  = false;
     right_clicked_ = false;
+    keys_pressed_.fill(false);
 }
 
 // キーが現在押されているかを返す（キーコードは GLFW_KEY_W などの定数）
 bool InputHandler::isHeld(int key) const {
     if (key < 0 || key >= KEY_COUNT) return false;
     return keys_[key];
+}
+
+bool InputHandler::wasJustPressed(int key) const {
+    if (key < 0 || key >= KEY_COUNT) return false;
+    return keys_pressed_[key];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -108,7 +114,10 @@ void InputHandler::keyCallback(GLFWwindow* w, int key, int /*sc*/, int action, i
     }
 
     if (key < 0 || key >= KEY_COUNT) return;
-    if (action == GLFW_PRESS)   self->keys_[key] = true;   // キーが押された
+    if (action == GLFW_PRESS) {
+        self->keys_[key]         = true;
+        self->keys_pressed_[key] = true;
+    }
     if (action == GLFW_RELEASE) self->keys_[key] = false;  // キーが離された
 }
 

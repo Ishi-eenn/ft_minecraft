@@ -12,6 +12,9 @@ public:
     // Key held state (excludes ESC — managed internally)
     bool isHeld(int glfw_key) const;
 
+    // True for exactly one frame after the key is pressed
+    bool wasJustPressed(int glfw_key) const;
+
     // Mouse delta (pixels since last frame, reset in newFrame)
     float mouseDX() const { return dx_; }
     float mouseDY() const { return dy_; }
@@ -45,7 +48,8 @@ private:
     static constexpr int KEY_COUNT = GLFW_KEY_LAST + 1;
 
     GLFWwindow* window_          = nullptr;
-    std::array<bool, KEY_COUNT> keys_ = {};
+    std::array<bool, KEY_COUNT> keys_         = {};
+    std::array<bool, KEY_COUNT> keys_pressed_ = {};
 
     double last_x_ = 0.0, last_y_ = 0.0;
     float  dx_     = 0.0f, dy_    = 0.0f;
