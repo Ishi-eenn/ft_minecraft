@@ -8,6 +8,12 @@
 struct RemotePlayer {
     float x = 0, y = 0, z = 0;
     float yaw = 0, pitch = 0;
+
+    // Animation state (updated by caller each frame)
+    float walk_phase = 0.0f;
+    float prev_x     = 0.0f;
+    float prev_z     = 0.0f;
+    bool  initialized = false;
 };
 
 struct NetworkEvent {
@@ -37,9 +43,8 @@ public:
     uint8_t  playerId()    const { return player_id_; }
     uint32_t seed()        const { return seed_; }
 
-    const std::map<uint8_t, RemotePlayer>& remotePlayers() const {
-        return remote_players_;
-    }
+    const std::map<uint8_t, RemotePlayer>& remotePlayers() const { return remote_players_; }
+          std::map<uint8_t, RemotePlayer>& remotePlayers()       { return remote_players_; }
 
 private:
     bool sendPacket(PacketType type, const void* payload, uint16_t size);

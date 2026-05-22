@@ -45,6 +45,7 @@ Renderer::~Renderer() {
     entity_shader_.destroy();
     if (entity_vao_)  { glDeleteVertexArrays(1, &entity_vao_);  entity_vao_  = 0; }
     if (entity_vbo_)  { glDeleteBuffers(1, &entity_vbo_);       entity_vbo_  = 0; }
+    if (entity_ebo_)  { glDeleteBuffers(1, &entity_ebo_);       entity_ebo_  = 0; }
     if (hud_vao_)     { glDeleteVertexArrays(1, &hud_vao_);     hud_vao_     = 0; }
     if (hud_vbo_)     { glDeleteBuffers(1, &hud_vbo_);          hud_vbo_     = 0; }
     if (overlay_vao_) { glDeleteVertexArrays(1, &overlay_vao_); overlay_vao_ = 0; }
@@ -121,32 +122,61 @@ bool Renderer::init(GLFWwindow* window) {
         return false;
     }
     {
-        // Wireframe box for a player: 0.6 wide × 1.8 tall, origin at feet.
-        static constexpr float HW = 0.30f, H = 1.80f;
+        // Unit box: (−0.5,−0.5,−0.5) to (+0.5,+0.5,+0.5).
+        // 6 faces × 4 vertices, each vertex has pos(3) + normal(3).
         static const float verts[] = {
-            // bottom face
-            -HW,  0,  -HW,   HW,  0,  -HW,
-             HW,  0,  -HW,   HW,  0,   HW,
-             HW,  0,   HW,  -HW,  0,   HW,
-            -HW,  0,   HW,  -HW,  0,  -HW,
-            // top face
-            -HW,  H,  -HW,   HW,  H,  -HW,
-             HW,  H,  -HW,   HW,  H,   HW,
-             HW,  H,   HW,  -HW,  H,   HW,
-            -HW,  H,   HW,  -HW,  H,  -HW,
-            // vertical edges
-            -HW,  0,  -HW,  -HW,  H,  -HW,
-             HW,  0,  -HW,   HW,  H,  -HW,
-             HW,  0,   HW,   HW,  H,   HW,
-            -HW,  0,   HW,  -HW,  H,   HW,
+            // +Y face
+            -0.5f, 0.5f,-0.5f,  0, 1, 0,
+             0.5f, 0.5f,-0.5f,  0, 1, 0,
+             0.5f, 0.5f, 0.5f,  0, 1, 0,
+            -0.5f, 0.5f, 0.5f,  0, 1, 0,
+            // -Y face
+            -0.5f,-0.5f,-0.5f,  0,-1, 0,
+             0.5f,-0.5f,-0.5f,  0,-1, 0,
+             0.5f,-0.5f, 0.5f,  0,-1, 0,
+            -0.5f,-0.5f, 0.5f,  0,-1, 0,
+            // +Z face
+            -0.5f,-0.5f, 0.5f,  0, 0, 1,
+             0.5f,-0.5f, 0.5f,  0, 0, 1,
+             0.5f, 0.5f, 0.5f,  0, 0, 1,
+            -0.5f, 0.5f, 0.5f,  0, 0, 1,
+            // -Z face
+            -0.5f,-0.5f,-0.5f,  0, 0,-1,
+             0.5f,-0.5f,-0.5f,  0, 0,-1,
+             0.5f, 0.5f,-0.5f,  0, 0,-1,
+            -0.5f, 0.5f,-0.5f,  0, 0,-1,
+            // +X face
+             0.5f,-0.5f,-0.5f,  1, 0, 0,
+             0.5f,-0.5f, 0.5f,  1, 0, 0,
+             0.5f, 0.5f, 0.5f,  1, 0, 0,
+             0.5f, 0.5f,-0.5f,  1, 0, 0,
+            // -X face
+            -0.5f,-0.5f,-0.5f, -1, 0, 0,
+            -0.5f,-0.5f, 0.5f, -1, 0, 0,
+            -0.5f, 0.5f, 0.5f, -1, 0, 0,
+            -0.5f, 0.5f,-0.5f, -1, 0, 0,
+        };
+        static const uint32_t idx[] = {
+             0, 1, 2,  0, 2, 3,    // +Y
+             4, 6, 5,  4, 7, 6,    // -Y
+             8, 9,10,  8,10,11,    // +Z
+            12,14,13, 12,15,14,    // -Z
+            16,17,18, 16,18,19,    // +X
+            20,22,21, 20,23,22,    // -X
         };
         glGenVertexArrays(1, &entity_vao_);
         glGenBuffers(1, &entity_vbo_);
+        glGenBuffers(1, &entity_ebo_);
         glBindVertexArray(entity_vao_);
         glBindBuffer(GL_ARRAY_BUFFER, entity_vbo_);
         glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, entity_ebo_);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(idx), idx, GL_STATIC_DRAW);
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float),
+                              (void*)(3 * sizeof(float)));
         glBindVertexArray(0);
     }
 
@@ -756,41 +786,128 @@ void Renderer::setTimeOfDay(float t) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// drawRemotePlayers() — 他プレイヤーをワイヤーフレームボックスで描画する
+// drawStevePart() — ユニットボックスに MVP とカラーを渡して1パーツ描画
+// ─────────────────────────────────────────────────────────────────────────────
+void Renderer::drawStevePart(const glm::mat4& mvp, const glm::mat4& model,
+                               const float* color) {
+    entity_shader_.setMat4("uMVP",   glm::value_ptr(mvp));
+    entity_shader_.setMat4("uModel", glm::value_ptr(model));
+    entity_shader_.setVec3("uColor", color[0], color[1], color[2]);
+    glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, nullptr);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// drawRemotePlayers() — Steve 風キャラクターで他プレイヤーを描画する
+//
+// Steve のパーツ（足元 y=0 基準、ユニット: 1ブロック）:
+//   Head:  中心 (0, 1.55, 0)、0.5×0.5×0.5
+//   Torso: 中心 (0, 0.975, 0)、0.5×0.75×0.25
+//   Arms:  肩 (±0.35, 1.30, 0) をピボットに垂れ下がる 0.20×0.65×0.20
+//   Legs:  股関節 (±0.185, 0.65, 0) をピボットに垂れ下がる 0.23×0.65×0.23
+//
+// アニメーション: walk_phase に応じて腕・脚を X 軸回転でスイング。
+//   左脚 ＝ 右腕が同位相、右脚 ＝ 左腕が同位相（自然な歩き）。
 // ─────────────────────────────────────────────────────────────────────────────
 void Renderer::drawRemotePlayers(const std::map<uint8_t, RemotePlayer>& players,
                                   const float* view4x4, const float* proj4x4) {
     if (players.empty() || !entity_vao_) return;
 
-    // Player colors cycle through a small palette (index = player_id % 6).
-    static const float kColors[][3] = {
-        {1.0f, 0.3f, 0.3f},  // red
-        {0.3f, 1.0f, 0.3f},  // green
-        {0.3f, 0.5f, 1.0f},  // blue
-        {1.0f, 1.0f, 0.3f},  // yellow
-        {1.0f, 0.5f, 0.0f},  // orange
-        {0.8f, 0.3f, 1.0f},  // purple
+    // Torso colors per player (head/arms = skin, legs = jeans)
+    static const float kTorsoColors[][3] = {
+        {0.25f, 0.35f, 0.75f},  // blue
+        {0.70f, 0.22f, 0.22f},  // red
+        {0.20f, 0.58f, 0.20f},  // green
+        {0.75f, 0.50f, 0.08f},  // orange
+        {0.55f, 0.20f, 0.72f},  // purple
+        {0.12f, 0.55f, 0.60f},  // teal
     };
+    static const float kSkin[]  = {0.83f, 0.66f, 0.52f};
+    static const float kJeans[] = {0.20f, 0.22f, 0.50f};
 
-    glm::mat4 view = glm::make_mat4(view4x4);
-    glm::mat4 proj = glm::make_mat4(proj4x4);
+    const glm::mat4 view = glm::make_mat4(view4x4);
+    const glm::mat4 proj = glm::make_mat4(proj4x4);
+    const glm::mat4 vp   = proj * view;
 
     entity_shader_.use();
+    entity_shader_.setVec3("uSunDir",
+                            sun_dir_[0], sun_dir_[1], sun_dir_[2]);
+    entity_shader_.setFloat("uAmbient",     ambient_);
+    entity_shader_.setFloat("uSunStrength", sun_strength_);
+
     glBindVertexArray(entity_vao_);
     glDisable(GL_CULL_FACE);
 
     for (auto& [id, rp] : players) {
-        // Position received is the camera (eye) position; feet = y - 1.62.
+        // Camera position → feet position (eye is 1.62 blocks above feet)
         static constexpr float EYE_H = 1.62f;
-        glm::mat4 model = glm::translate(glm::mat4(1.0f),
-                                          glm::vec3(rp.x, rp.y - EYE_H, rp.z));
-        glm::mat4 mvp = proj * view * model;
-        entity_shader_.setMat4("uMVP", glm::value_ptr(mvp));
 
-        const float* col = kColors[id % 6];
-        entity_shader_.setVec3("uColor", col[0], col[1], col[2]);
+        // Global transform: translate to feet, then rotate body to face yaw.
+        // yaw=0 → front=(1,0,0) (+X); model default forward is +Z, so yaw-90°.
+        glm::mat4 global = glm::translate(glm::mat4(1.0f),
+                                           glm::vec3(rp.x, rp.y - EYE_H, rp.z));
+        global = glm::rotate(global,
+                              glm::radians(rp.yaw - 90.0f),
+                              glm::vec3(0.f, 1.f, 0.f));
 
-        glDrawArrays(GL_LINES, 0, 24);
+        // Walking animation: ±30° limb swing
+        const float swing = glm::radians(sinf(rp.walk_phase) * 30.0f);
+        const float* tc   = kTorsoColors[id % 6];
+
+        // ── Head (no animation) ─────────────────────────────────────────────
+        {
+            glm::vec3 sz(0.50f, 0.50f, 0.50f);
+            glm::mat4 m = glm::translate(global, glm::vec3(0.f, 1.55f, 0.f));
+            m = glm::scale(m, sz);
+            drawStevePart(vp * m, m, kSkin);
+        }
+
+        // ── Torso (no animation) ────────────────────────────────────────────
+        {
+            glm::vec3 sz(0.50f, 0.75f, 0.25f);
+            glm::mat4 m = glm::translate(global, glm::vec3(0.f, 0.975f, 0.f));
+            m = glm::scale(m, sz);
+            drawStevePart(vp * m, m, tc);
+        }
+
+        // ── Left Arm  (pivot = left shoulder, swings same as right leg) ────
+        {
+            glm::vec3 sz(0.20f, 0.65f, 0.20f);
+            glm::mat4 m = glm::translate(global, glm::vec3(-0.35f, 1.30f, 0.f));
+            m = glm::rotate(m, -swing, glm::vec3(1.f, 0.f, 0.f));
+            m = glm::translate(m, glm::vec3(0.f, -sz.y * 0.5f, 0.f));
+            m = glm::scale(m, sz);
+            drawStevePart(vp * m, m, kSkin);
+        }
+
+        // ── Right Arm (pivot = right shoulder, swings same as left leg) ────
+        {
+            glm::vec3 sz(0.20f, 0.65f, 0.20f);
+            glm::mat4 m = glm::translate(global, glm::vec3( 0.35f, 1.30f, 0.f));
+            m = glm::rotate(m,  swing, glm::vec3(1.f, 0.f, 0.f));
+            m = glm::translate(m, glm::vec3(0.f, -sz.y * 0.5f, 0.f));
+            m = glm::scale(m, sz);
+            drawStevePart(vp * m, m, kSkin);
+        }
+
+        // ── Left Leg (pivot = left hip) ─────────────────────────────────────
+        {
+            glm::vec3 sz(0.23f, 0.65f, 0.23f);
+            glm::mat4 m = glm::translate(global, glm::vec3(-0.185f, 0.65f, 0.f));
+            m = glm::rotate(m,  swing, glm::vec3(1.f, 0.f, 0.f));
+            m = glm::translate(m, glm::vec3(0.f, -sz.y * 0.5f, 0.f));
+            m = glm::scale(m, sz);
+            drawStevePart(vp * m, m, kJeans);
+        }
+
+        // ── Right Leg (pivot = right hip) ───────────────────────────────────
+        {
+            glm::vec3 sz(0.23f, 0.65f, 0.23f);
+            glm::mat4 m = glm::translate(global, glm::vec3( 0.185f, 0.65f, 0.f));
+            m = glm::rotate(m, -swing, glm::vec3(1.f, 0.f, 0.f));
+            m = glm::translate(m, glm::vec3(0.f, -sz.y * 0.5f, 0.f));
+            m = glm::scale(m, sz);
+            drawStevePart(vp * m, m, kJeans);
+        }
     }
 
     glEnable(GL_CULL_FACE);

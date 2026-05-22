@@ -28,24 +28,20 @@ public:
     void drawSkybox(const float* view3x3, const float* proj4x4) override;
     void drawHud(int fps, int px, int py, int pz);
     void drawUnderwaterOverlay();
-    // Returns true when the player presses SPACE to start the game
     bool drawTitleScreen(float dt);
-    // Update the minimap texture from world data, then render it
     void updateMinimap(World& world, float px, float pz, float yaw_deg, float dt);
     void drawMinimap();
     void drawRemotePlayers(const std::map<uint8_t, RemotePlayer>& players,
                            const float* view4x4, const float* proj4x4);
     void endFrame() override;
     void onResize(int w, int h) override;
-
-    // Update all lighting/sky parameters from a [0,1) time-of-day value.
-    // 0.0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset.
     void setTimeOfDay(float t);
 
     const Frustum& getFrustum() const { return frustum_; }
 
 private:
     void initHud();
+    void drawStevePart(const glm::mat4& mvp, const glm::mat4& model, const float* color);
     void appendLine(float* verts, int& count, float x0, float y0, float x1, float y1) const;
     void appendDigit(float* verts, int& count, int digit, float left, float top, float w, float h) const;
     void appendNumber(float* verts, int& count, int value, float right, float top, float w, float h, float gap) const;
@@ -59,6 +55,7 @@ private:
     Shader       entity_shader_;
     uint32_t     entity_vao_ = 0;
     uint32_t     entity_vbo_ = 0;
+    uint32_t     entity_ebo_ = 0;
     TextureAtlas atlas_;
     Skybox       skybox_;
     Frustum      frustum_;
@@ -72,7 +69,6 @@ private:
     uint32_t     overlay_vao_ = 0;
     uint32_t     overlay_vbo_ = 0;
 
-    // Lighting / sky state (updated by setTimeOfDay)
     float sun_dir_[3]      = { 0.0f,  1.0f, 0.0f};
     float ambient_         = 0.30f;
     float sun_strength_    = 0.65f;

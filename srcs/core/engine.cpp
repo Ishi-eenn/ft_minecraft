@@ -466,6 +466,21 @@ void Engine::run() {
                     rebuildModified(ev.bx, ev.bz, *impl_->chunk_mgr);
                 }
             }
+            // Update walking animation phase for each remote player.
+            for (auto& [id, rp] : impl_->net_client.remotePlayers()) {
+                if (!rp.initialized) {
+                    rp.prev_x     = rp.x;
+                    rp.prev_z     = rp.z;
+                    rp.initialized = true;
+                }
+                float dx    = rp.x - rp.prev_x;
+                float dz    = rp.z - rp.prev_z;
+                float speed = std::sqrt(dx * dx + dz * dz) / dt;
+                if (speed > 0.3f)
+                    rp.walk_phase += dt * 8.0f;  // ~1.3 full cycles/sec at normal walk
+                rp.prev_x = rp.x;
+                rp.prev_z = rp.z;
+            }
         }
 
         // ── チャンクのストリーミング ─────────────────────────────────────────
