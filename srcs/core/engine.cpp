@@ -138,6 +138,37 @@ static void rebuildModified(int wx, int wz, ChunkManager& mgr) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// インベントリ操作ヘルパー
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ブロックをインベントリに1個追加する。既存スタックに積む → 空きスロットを探す。
+static void inventoryAdd(Inventory& inv, BlockType type) {
+    if (type == BlockType::Air || type == BlockType::Water) return;
+    for (int i = 0; i < HOTBAR_SIZE; ++i) {
+        if (inv.slots[i].type == type && inv.slots[i].count < STACK_MAX) {
+            ++inv.slots[i].count;
+            return;
+        }
+    }
+    for (int i = 0; i < HOTBAR_SIZE; ++i) {
+        if (inv.slots[i].type == BlockType::Air) {
+            inv.slots[i] = {type, 1};
+            return;
+        }
+    }
+    // インベントリ満杯: 無音で捨てる
+}
+
+// 選択スロットから1個消費する。成功なら true を返す。
+static bool inventoryConsume(Inventory& inv) {
+    ItemStack& s = inv.slots[inv.selected];
+    if (s.type == BlockType::Air || s.count <= 0) return false;
+    --s.count;
+    if (s.count == 0) s = {};
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Engine の内部実装データ（pImpl パターン）
 // ─────────────────────────────────────────────────────────────────────────────
 // 1日の長さ（リアル時間の秒数）。600秒 = 10分で昼夜1サイクル。
@@ -149,7 +180,7 @@ struct Engine::Impl {
     Player        player;      // プレイヤー移動・物理担当
     ChunkManager* chunk_mgr = nullptr;  // チャンクの読み込み・破棄担当
 
-    BlockType     selected_block = BlockType::Stone;
+    Inventory     inventory;
     float         time_of_day    = 0.35f;
     bool          show_minimap_  = true;
 
@@ -401,52 +432,61 @@ void Engine::run() {
             prev_m = cur_m;
         }
 
-        // ── ブロック種類の選択・操作 ─────────────────────────────────────────
+        // ── ホットバー選択・ブロック操作 ─────────────────────────────────────
         {
             InputHandler& inp = impl_->player.input();
+            Inventory&    inv = impl_->inventory;
 
-            // キー 1〜6 で設置ブロックを切り替え
-            for (int k = GLFW_KEY_1; k <= GLFW_KEY_6; ++k) {
-                if (inp.isHeld(k)) {
-                    impl_->selected_block =
-                        static_cast<BlockType>(k - GLFW_KEY_1 + 1);
-                    break;
-                }
+            // キー 1〜9: ホットバースロットを選択（ワンショット: 前フレームと差分）
+            static bool prev_num[9] = {};
+            for (int k = 0; k < 9; ++k) {
+                bool cur = inp.isHeld(GLFW_KEY_1 + k);
+                if (cur && !prev_num[k]) inv.selected = k;
+                prev_num[k] = cur;
             }
+
+            // スクロールホイールでスロットを循環
+            float sw = inp.scrollY();
+            if (sw < -0.5f)
+                inv.selected = (inv.selected + 1) % HOTBAR_SIZE;
+            else if (sw > 0.5f)
+                inv.selected = (inv.selected + HOTBAR_SIZE - 1) % HOTBAR_SIZE;
 
             // カーソルがキャプチャされているときだけブロック操作を受け付ける
             if (inp.isCursorCaptured()) {
-                // カメラ正面方向にレイを飛ばして当たったブロックを特定
                 glm::vec3 pos   = impl_->player.camera().position();
                 glm::vec3 front = impl_->player.camera().front();
                 RayHit hit = castRay(pos, front, 6.0f, impl_->world);
 
-                // 左クリック: ブロックを壊す OR ゾンビを攻撃
+                // 左クリック: ブロックを壊してインベントリに追加 OR ゾンビを攻撃
                 if (inp.wasLeftClicked()) {
                     if (hit.hit) {
+                        BlockType broken = impl_->world.getWorldBlock(
+                            hit.bx, hit.by, hit.bz);
                         impl_->world.setWorldBlock(hit.bx, hit.by, hit.bz,
                                                    BlockType::Air);
                         rebuildModified(hit.bx, hit.bz, *impl_->chunk_mgr);
+                        inventoryAdd(inv, broken);
                         if (impl_->multiplayer)
                             impl_->net_client.sendBlockChange(
                                 hit.bx, hit.by, hit.bz,
                                 static_cast<uint8_t>(BlockType::Air));
                     } else {
-                        // ブロックに当たらなかった → 前方のゾンビを攻撃
                         impl_->mob_mgr.playerMeleeAttack(
                             pos.x, pos.y, pos.z, front.x, front.z);
                     }
                 }
-                if (hit.hit) {
-                    // 右クリック: ブロックを置く
-                    if (inp.wasRightClicked()) {
+                // 右クリック: 選択スロットのブロックを設置（在庫があるときのみ）
+                if (hit.hit && inp.wasRightClicked()) {
+                    BlockType to_place = inv.slots[inv.selected].type;
+                    if (to_place != BlockType::Air && inventoryConsume(inv)) {
                         impl_->world.setWorldBlock(hit.nx, hit.ny, hit.nz,
-                                                   impl_->selected_block);
+                                                   to_place);
                         rebuildModified(hit.nx, hit.nz, *impl_->chunk_mgr);
                         if (impl_->multiplayer)
                             impl_->net_client.sendBlockChange(
                                 hit.nx, hit.ny, hit.nz,
-                                static_cast<uint8_t>(impl_->selected_block));
+                                static_cast<uint8_t>(to_place));
                     }
                 }
             }
@@ -586,6 +626,9 @@ void Engine::run() {
                                 (int)std::floor(ppos.x),
                                 (int)std::floor(ppos.y),
                                 (int)std::floor(ppos.z));
+
+        // ホットバー（画面下中央）を描画
+        impl_->renderer.drawHotbar(impl_->inventory);
 
         // ミニマップ（左上）を更新して描画（M キーでトグル）
         if (impl_->show_minimap_) {

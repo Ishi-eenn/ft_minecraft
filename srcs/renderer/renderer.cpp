@@ -51,6 +51,11 @@ Renderer::~Renderer() {
     if (hud_vbo_)     { glDeleteBuffers(1, &hud_vbo_);          hud_vbo_     = 0; }
     if (overlay_vao_) { glDeleteVertexArrays(1, &overlay_vao_); overlay_vao_ = 0; }
     if (overlay_vbo_) { glDeleteBuffers(1, &overlay_vbo_);      overlay_vbo_ = 0; }
+    if (hotbar_vao_)      { glDeleteVertexArrays(1, &hotbar_vao_);      hotbar_vao_      = 0; }
+    if (hotbar_vbo_)      { glDeleteBuffers(1, &hotbar_vbo_);          hotbar_vbo_      = 0; }
+    hotbar_shader_.destroy();
+    if (hotbar_tex_vao_)  { glDeleteVertexArrays(1, &hotbar_tex_vao_); hotbar_tex_vao_  = 0; }
+    if (hotbar_tex_vbo_)  { glDeleteBuffers(1, &hotbar_tex_vbo_);      hotbar_tex_vbo_  = 0; }
     atlas_.destroy();
     skybox_.destroy();
     cloud_.destroy();
@@ -226,6 +231,31 @@ void Renderer::initHud() {
     glBufferData(GL_ARRAY_BUFFER, 1024 * 2 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void*)0);
+    glBindVertexArray(0);
+
+    // ホットバー背景用 VAO (2D のみ, 1スロット分を逐次更新)
+    glGenVertexArrays(1, &hotbar_vao_);
+    glGenBuffers(1, &hotbar_vbo_);
+    glBindVertexArray(hotbar_vao_);
+    glBindBuffer(GL_ARRAY_BUFFER, hotbar_vbo_);
+    glBufferData(GL_ARRAY_BUFFER, 12 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+    glBindVertexArray(0);
+
+    // ホットバーテクスチャアイコン用 VAO (pos.xy + uv.xy, 9スロット一括)
+    hotbar_shader_.load("assets/shaders/hotbar.vert", "assets/shaders/hotbar.frag");
+    glGenVertexArrays(1, &hotbar_tex_vao_);
+    glGenBuffers(1, &hotbar_tex_vbo_);
+    glBindVertexArray(hotbar_tex_vao_);
+    glBindBuffer(GL_ARRAY_BUFFER, hotbar_tex_vbo_);
+    // 9スロット × 6頂点 × 4floats = 216 floats
+    glBufferData(GL_ARRAY_BUFFER, 9 * 6 * 4 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                          (void*)(2 * sizeof(float)));
     glBindVertexArray(0);
 
     // 水中オーバーレイ: 画面全体を覆う2枚の三角形（NDC 座標）
@@ -421,6 +451,204 @@ void Renderer::drawHud(int fps, int px, int py, int pz) {
     glBindVertexArray(hud_vao_);
     glDrawArrays(GL_LINES, 0, count / 2);
     glBindVertexArray(0);
+    glEnable(GL_DEPTH_TEST);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// drawHotbar() — 画面下中央にホットバー（9スロット）を描画する
+//
+// パス1: hud_shader_    — スロット背景
+// パス2: hotbar_shader_ — 3Dアイソメトリックブロック（上面・左面・右面）
+// パス3: hud_shader_    — 枠線 + 選択ハイライト + 個数（7セグ）
+//
+// 【アイソメトリックキューブの頂点レイアウト】
+//
+//          T
+//         / \
+//       TL   TR       ← "赤道"ライン（上面と側面の境界）
+//       |\ / |
+//       | M  |        ← 3面の内側交点
+//       BL   BR       ← 底の赤道ライン
+//         \ /
+//          B
+//
+//   上面: T, TR, M, TL  — 最も明るい（uBright=1.00）
+//   左面: TL, M, B, BL  — 中くらい    （uBright=0.74）
+//   右面: TR, BR, B, M  — 最も暗い    （uBright=0.58）
+// ─────────────────────────────────────────────────────────────────────────────
+void Renderer::drawHotbar(const Inventory& inv) {
+    const float hw = (float)width_  * 0.5f;
+    const float hh = (float)height_ * 0.5f;
+
+    constexpr float SLOT_PX   = 52.0f;
+    constexpr float GAP_PX    =  5.0f;
+    constexpr float BOTTOM_PX = 14.0f;
+
+    const float total_w = HOTBAR_SIZE * SLOT_PX + (HOTBAR_SIZE - 1) * GAP_PX;
+    const float sx0_px  = ((float)width_ - total_w) * 0.5f;
+
+    auto nx = [&](float px) { return px / hw - 1.0f; };
+    auto ny = [&](float py) { return py / hh - 1.0f; };
+
+    const float sy0 = ny(BOTTOM_PX);
+    const float sy1 = ny(BOTTOM_PX + SLOT_PX);
+
+    // アイソメトリックキューブの寸法（ピクセル→NDC）
+    // 2:1 アイソメトリック比: 上面の高さ = 水平幅 / 2
+    const float W  = 21.0f / hw;    // 半幅
+    const float HT = 10.5f / hh;    // 上面の半高さ（2:1比 → HT = W*hw/hh/2）
+    const float HS = 12.0f / hh;    // 側面の高さ
+
+    glDisable(GL_DEPTH_TEST);
+
+    // ── パス1: スロット背景 ────────────────────────────────────────────────
+    hud_shader_.use();
+    auto drawBgQuad = [&](float x0, float y0, float x1, float y1) {
+        float v[12] = { x0, y0,  x1, y0,  x1, y1,
+                        x0, y0,  x1, y1,  x0, y1 };
+        glBindBuffer(GL_ARRAY_BUFFER, hotbar_vbo_);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(v), v);
+        glBindVertexArray(hotbar_vao_);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glBindVertexArray(0);
+    };
+    for (int i = 0; i < HOTBAR_SIZE; ++i) {
+        float x0 = nx(sx0_px + i * (SLOT_PX + GAP_PX));
+        float x1 = nx(sx0_px + i * (SLOT_PX + GAP_PX) + SLOT_PX);
+        float bg = (i == inv.selected) ? 0.55f : 0.22f;
+        hud_shader_.setVec4("uColor", bg * 0.6f, bg * 0.6f, bg * 0.6f, 0.85f);
+        drawBgQuad(x0, sy0, x1, sy1);
+    }
+
+    // ── パス2: 3Dアイソメトリックブロック ────────────────────────────────
+    // face=0: 上面(bright=1.00)  face=1: 左面(bright=0.74)  face=2: 右面(bright=0.58)
+    static constexpr float kFaceBright[3] = { 1.00f, 0.74f, 0.58f };
+
+    glDisable(GL_CULL_FACE);
+    hotbar_shader_.use();
+    hotbar_shader_.setInt("uAtlas", 0);
+    atlas_.bind(0);
+    glBindVertexArray(hotbar_tex_vao_);
+
+    for (int face = 0; face < 3; ++face) {
+        hotbar_shader_.setFloat("uBright", kFaceBright[face]);
+
+        float verts[9 * 6 * 4] = {};
+        int   vc = 0, drawn = 0;
+
+        for (int i = 0; i < HOTBAR_SIZE; ++i) {
+            const ItemStack& s = inv.slots[i];
+            if (s.type == BlockType::Air || s.count <= 0) continue;
+
+            AtlasUV uv = atlas_.getUV(s.type);
+            float uc = (uv.u0 + uv.u1) * 0.5f;
+            float vc2 = (uv.v0 + uv.v1) * 0.5f;
+
+            // スロット垂直中心（アイコン基準点）
+            float cx = nx(sx0_px + i * (SLOT_PX + GAP_PX) + SLOT_PX * 0.5f);
+            // キューブ中心を少し上寄りにオフセット（底の隙間を減らす）
+            float cy = ny(BOTTOM_PX + SLOT_PX * 0.5f) + HS * 0.1f;
+
+            // 7頂点
+            float T_x = cx,    T_y = cy + HT + HS;
+            float TL_x = cx-W, TL_y = cy + HS;
+            float TR_x = cx+W, TR_y = cy + HS;
+            float M_x  = cx,   M_y  = cy;
+            float BL_x = cx-W, BL_y = cy - HS;
+            float BR_x = cx+W, BR_y = cy - HS;
+            float B_x  = cx,   B_y  = cy - HT - HS;
+
+            // 各面を2三角形で定義: [x, y, u, v] × 6頂点
+            float tri[6][4];
+
+            if (face == 0) {
+                // 上面(ダイヤモンドUV: テクスチャを45°回転して貼る)
+                tri[0][0]=T_x;  tri[0][1]=T_y;  tri[0][2]=uc;     tri[0][3]=uv.v0;
+                tri[1][0]=TR_x; tri[1][1]=TR_y; tri[1][2]=uv.u1;  tri[1][3]=vc2;
+                tri[2][0]=M_x;  tri[2][1]=M_y;  tri[2][2]=uc;     tri[2][3]=uv.v1;
+                tri[3][0]=T_x;  tri[3][1]=T_y;  tri[3][2]=uc;     tri[3][3]=uv.v0;
+                tri[4][0]=M_x;  tri[4][1]=M_y;  tri[4][2]=uc;     tri[4][3]=uv.v1;
+                tri[5][0]=TL_x; tri[5][1]=TL_y; tri[5][2]=uv.u0;  tri[5][3]=vc2;
+            } else if (face == 1) {
+                // 左面
+                tri[0][0]=TL_x; tri[0][1]=TL_y; tri[0][2]=uv.u0;  tri[0][3]=uv.v0;
+                tri[1][0]=M_x;  tri[1][1]=M_y;  tri[1][2]=uv.u1;  tri[1][3]=uv.v0;
+                tri[2][0]=B_x;  tri[2][1]=B_y;  tri[2][2]=uv.u1;  tri[2][3]=uv.v1;
+                tri[3][0]=TL_x; tri[3][1]=TL_y; tri[3][2]=uv.u0;  tri[3][3]=uv.v0;
+                tri[4][0]=B_x;  tri[4][1]=B_y;  tri[4][2]=uv.u1;  tri[4][3]=uv.v1;
+                tri[5][0]=BL_x; tri[5][1]=BL_y; tri[5][2]=uv.u0;  tri[5][3]=uv.v1;
+            } else {
+                // 右面
+                tri[0][0]=TR_x; tri[0][1]=TR_y; tri[0][2]=uv.u0;  tri[0][3]=uv.v0;
+                tri[1][0]=BR_x; tri[1][1]=BR_y; tri[1][2]=uv.u0;  tri[1][3]=uv.v1;
+                tri[2][0]=B_x;  tri[2][1]=B_y;  tri[2][2]=uv.u1;  tri[2][3]=uv.v1;
+                tri[3][0]=TR_x; tri[3][1]=TR_y; tri[3][2]=uv.u0;  tri[3][3]=uv.v0;
+                tri[4][0]=B_x;  tri[4][1]=B_y;  tri[4][2]=uv.u1;  tri[4][3]=uv.v1;
+                tri[5][0]=M_x;  tri[5][1]=M_y;  tri[5][2]=uv.u1;  tri[5][3]=uv.v0;
+            }
+
+            for (int v = 0; v < 6; ++v)
+                for (int c = 0; c < 4; ++c)
+                    verts[vc++] = tri[v][c];
+            ++drawn;
+        }
+
+        if (drawn > 0) {
+            glBindBuffer(GL_ARRAY_BUFFER, hotbar_tex_vbo_);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, vc * sizeof(float), verts);
+            glDrawArrays(GL_TRIANGLES, 0, drawn * 6);
+        }
+    }
+
+    glBindVertexArray(0);
+    glEnable(GL_CULL_FACE);
+
+    // ── パス3: 枠線 + 選択ハイライト + 個数 ──────────────────────────────
+    hud_shader_.use();
+    std::array<float, 2048> verts{};
+    int cnt = 0;
+
+    for (int i = 0; i < HOTBAR_SIZE; ++i) {
+        float x0 = nx(sx0_px + i * (SLOT_PX + GAP_PX));
+        float x1 = nx(sx0_px + i * (SLOT_PX + GAP_PX) + SLOT_PX);
+
+        // 通常枠線（暗め）→ 後で白を上書きするのでバッチへ追加するだけ
+        appendLine(verts.data(), cnt, x0, sy0, x1, sy0);
+        appendLine(verts.data(), cnt, x0, sy1, x1, sy1);
+        appendLine(verts.data(), cnt, x0, sy0, x0, sy1);
+        appendLine(verts.data(), cnt, x1, sy0, x1, sy1);
+
+        // 個数（2個以上のとき右下に表示）
+        const ItemStack& s = inv.slots[i];
+        if (s.type != BlockType::Air && s.count > 1) {
+            float dw = 8.0f / hw, dh = 11.0f / hh, dg = 2.0f / hw;
+            appendNumber(verts.data(), cnt, s.count,
+                         x1 - 3.0f / hw, sy0 + dh + 3.0f / hh, dw, dh, dg);
+        }
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, hud_vbo_);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, cnt * sizeof(float), verts.data());
+    hud_shader_.setVec4("uColor", 0.75f, 0.75f, 0.75f, 0.85f);
+    glBindVertexArray(hud_vao_);
+    glDrawArrays(GL_LINES, 0, cnt / 2);
+
+    // 選択スロットだけ明るい白で上書き描画
+    {
+        int i = inv.selected;
+        float x0 = nx(sx0_px + i * (SLOT_PX + GAP_PX));
+        float x1 = nx(sx0_px + i * (SLOT_PX + GAP_PX) + SLOT_PX);
+        float sel[16] = {
+            x0, sy0, x1, sy0,
+            x0, sy1, x1, sy1,
+            x0, sy0, x0, sy1,
+            x1, sy0, x1, sy1,
+        };
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(sel), sel);
+        hud_shader_.setVec4("uColor", 1.0f, 1.0f, 1.0f, 1.0f);
+        glDrawArrays(GL_LINES, 0, 8);
+    }
+    glBindVertexArray(0);
+
     glEnable(GL_DEPTH_TEST);
 }
 

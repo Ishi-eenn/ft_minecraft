@@ -31,6 +31,7 @@ public:
     void drawClouds(const float* view4x4, const float* proj4x4,
                     float cam_x, float cam_z, float elapsed_s);
     void drawHud(int fps, int px, int py, int pz);
+    void drawHotbar(const Inventory& inv);
     void drawUnderwaterOverlay();
     bool drawTitleScreen(float dt);
     void updateMinimap(World& world, float px, float pz, float yaw_deg, float dt);
@@ -76,6 +77,11 @@ private:
     uint32_t     hud_vbo_     = 0;
     uint32_t     overlay_vao_ = 0;
     uint32_t     overlay_vbo_ = 0;
+    uint32_t     hotbar_vao_  = 0;   // slot backgrounds (2D only)
+    uint32_t     hotbar_vbo_  = 0;
+    Shader       hotbar_shader_;    // textured block icon shader
+    uint32_t     hotbar_tex_vao_ = 0;  // pos+UV for textured icons
+    uint32_t     hotbar_tex_vbo_ = 0;
 
     float sun_dir_[3]      = { 0.0f,  1.0f, 0.0f};
     float ambient_         = 0.30f;

@@ -82,6 +82,18 @@ constexpr int   ATLAS_TILE_SIZE      = 16;    // pixels per tile
 constexpr int   ATLAS_COLS           = 8;     // tiles per row
 constexpr int   CHUNKS_PER_FRAME_GEN = 16;    // max mesh uploads per frame
 constexpr int   SEA_LEVEL            = 42;    // y at which water surface sits
+constexpr int   HOTBAR_SIZE          = 9;
+constexpr int   STACK_MAX            = 64;
+
+struct ItemStack {
+    BlockType type  = BlockType::Air;
+    int       count = 0;
+};
+
+struct Inventory {
+    ItemStack slots[HOTBAR_SIZE] = {};
+    int       selected           = 0;  // 0–8
+};
 
 // ─── Chunk data ───────────────────────────────────────────────────────────────
 struct ChunkGpuMesh {
