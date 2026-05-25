@@ -357,11 +357,10 @@ void Engine::run() {
 
     // ── メインゲームループ ───────────────────────────────────────────────────
     auto prev   = Clock::now();
-    float fps_timer       = 0.0f;
-    int   fps_frames      = 0;
-    int   fps_display     = 0;
-    float rd_adjust_timer = 0.0f;  // レンダー距離調整のクールダウンタイマー（秒）
-    float elapsed_s       = 0.0f;  // 起動からの経過秒数（雲アニメーション用）
+    float fps_timer   = 0.0f;
+    int   fps_frames  = 0;
+    int   fps_display = 0;
+    float elapsed_s   = 0.0f;  // 起動からの経過秒数（雲アニメーション用）
 
     while (running_) {
         // ── デルタタイム計算 ──────────────────────────────────────────────────
@@ -373,30 +372,14 @@ void Engine::run() {
         prev      = now;
         // dtを上限0.1秒でクランプ。カクついた瞬間に物理が暴走するのを防ぐ。
         if (dt > 0.1f) dt = 0.1f;
-        fps_timer       += dt;
-        rd_adjust_timer += dt;
-        elapsed_s       += dt;
+        fps_timer += dt;
+        elapsed_s += dt;
         ++fps_frames;
         // 0.25秒ごとにFPSを更新（毎フレーム更新すると数字が激しく変わって読めない）
         if (fps_timer >= 0.25f) {
             fps_display = (int)std::round((float)fps_frames / fps_timer);
             fps_timer  = 0.0f;
             fps_frames = 0;
-        }
-
-        // ── 動的レンダー距離 ─────────────────────────────────────────────────
-        // FPSに合わせてチャンクの描画距離を自動調整する。
-        //   30FPS未満 → 描画距離を縮小（GPU負荷を下げる）
-        //   55FPS超過 → 描画距離を拡大（余裕があるので遠くまで見せる）
-        // 頻繁に変えると振動するため、1秒に1回だけ調整する（ヒステリシス）。
-        if (rd_adjust_timer >= 1.0f) {
-            rd_adjust_timer = 0.0f;
-            int cur = impl_->chunk_mgr->renderDistance();
-            if (fps_display > 0 && fps_display < 30 && cur > RENDER_DISTANCE_MIN) {
-                impl_->chunk_mgr->setRenderDistance(cur - 1);
-            } else if (fps_display > 55 && cur < RENDER_DISTANCE_MAX) {
-                impl_->chunk_mgr->setRenderDistance(cur + 1);
-            }
         }
 
         // ── プレイヤー入力・移動・物理 ────────────────────────────────────────

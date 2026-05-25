@@ -69,12 +69,11 @@ struct Vertex {
 constexpr int   CHUNK_SIZE_X         = 16;
 constexpr int   CHUNK_SIZE_Y         = 256;
 constexpr int   CHUNK_SIZE_Z         = 16;
-constexpr int   RENDER_DISTANCE_MIN  = 1;     // chunks (= 16 blocks, satisfies 14-cube floor)
-constexpr int   RENDER_DISTANCE_MAX  = 10;    // chunks (= 160 blocks)
-constexpr int   RENDER_DISTANCE      = RENDER_DISTANCE_MAX;  // initial value
-constexpr int   MAX_LOADED_CHUNKS    = 500;
-constexpr float PLAYER_SPEED_NORMAL  = 1.0f;  // blocks/sec
-constexpr float PLAYER_SPEED_FAST    = 20.0f; // blocks/sec (20x key)
+constexpr int   RENDER_DISTANCE      = 17;    // chunks (= 272 blocks, subject requires 260+)
+constexpr int   MAX_LOADED_CHUNKS    = 1300;  // (2*17+1)^2 = 1225 chunks max in view
+constexpr float PLAYER_SPEED_NORMAL  = 1.0f;  // blocks/sec (walk)
+constexpr float PLAYER_SPEED_SPRINT  = 2.0f;  // blocks/sec (sprint on ground)
+constexpr float PLAYER_SPEED_FLY     = 20.0f; // blocks/sec (fly = 20x walk, subject V.3)
 constexpr float FOV_DEGREES          = 80.0f;
 constexpr float NEAR_PLANE           = 0.1f;
 constexpr float FAR_PLANE            = 600.0f;

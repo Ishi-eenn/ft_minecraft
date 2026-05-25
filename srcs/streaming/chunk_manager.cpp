@@ -195,8 +195,8 @@ void ChunkManager::update(float playerX, float playerZ, uint64_t frame) {
 }
 
 void ChunkManager::setRenderDistance(int rd) {
-    if (rd < RENDER_DISTANCE_MIN) rd = RENDER_DISTANCE_MIN;
-    if (rd > RENDER_DISTANCE_MAX) rd = RENDER_DISTANCE_MAX;
+    if (rd < 1)               rd = 1;
+    if (rd > RENDER_DISTANCE) rd = RENDER_DISTANCE;
     render_distance_ = rd;
 }
 
