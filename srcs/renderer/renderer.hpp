@@ -44,6 +44,12 @@ public:
     void onResize(int w, int h) override;
     void setTimeOfDay(float t);
 
+    // Shadow mapping
+    void updateShadowMatrix(float px, float py, float pz);
+    void beginShadowPass();
+    void endShadowPass();
+    void drawChunkShadow(const Chunk* chunk);
+
     const Frustum& getFrustum() const { return frustum_; }
 
 private:
@@ -55,8 +61,11 @@ private:
     void appendLetter(float* verts, int& count, char letter, float left, float top, float w, float h) const;
     void appendSignedNumberLeft(float* verts, int& count, int value, float left, float top, float w, float h, float gap) const;
 
+    static constexpr int SHADOW_MAP_SIZE = 2048;
+
     GLFWwindow*  window_  = nullptr;
     Shader       chunk_shader_;
+    Shader       shadow_shader_;
     Shader       sky_shader_;
     Shader       hud_shader_;
     Shader       entity_shader_;
@@ -82,6 +91,11 @@ private:
     Shader       hotbar_shader_;    // textured block icon shader
     uint32_t     hotbar_tex_vao_ = 0;  // pos+UV for textured icons
     uint32_t     hotbar_tex_vbo_ = 0;
+
+    // Shadow map FBO
+    uint32_t     shadow_fbo_       = 0;
+    uint32_t     shadow_depth_tex_ = 0;
+    float        light_space_mat_[16] = {};  // lightProj * lightView
 
     float sun_dir_[3]      = { 0.0f,  1.0f, 0.0f};
     float ambient_         = 0.30f;

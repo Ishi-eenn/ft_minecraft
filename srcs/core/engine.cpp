@@ -187,8 +187,9 @@ struct Engine::Impl {
 
     // Multiplayer
     NetworkClient net_client;
-    bool          multiplayer   = false;
-    float         net_pos_timer = 0.0f;
+    bool          multiplayer    = false;
+    float         net_pos_timer  = 0.0f;
+    float         mob_sync_timer = 0.0f;   // ホスト用: mob送信インターバル
 
     // Mobs
     MobManager    mob_mgr;
@@ -495,15 +496,16 @@ void Engine::run() {
         }
 
         // ── 昼夜サイクル更新 ─────────────────────────────────────────────────
-        // time_of_day を少しずつ進め、1.0になったら0に戻す（ループ）。
-        // 600秒（10分）で0→1になる速さ。
+        // マルチプレイ時はサーバーからの TimeSync で時刻が上書きされるが、
+        // 受信間隔（5秒）の間は各クライアントが自分で進める。
         impl_->time_of_day += dt / DAY_DURATION;
         if (impl_->time_of_day >= 1.0f) impl_->time_of_day -= 1.0f;
-        // レンダラーに時刻を伝え、空の色・太陽方向・光の強さを更新してもらう
         impl_->renderer.setTimeOfDay(impl_->time_of_day);
 
         // ── マルチプレイ: ネットワーク送受信 ────────────────────────────────────
         glm::vec3 ppos = impl_->player.camera().position();
+        const bool is_mob_host = !impl_->multiplayer ||
+                                  impl_->net_client.playerId() == 1;
         if (impl_->multiplayer) {
             impl_->net_pos_timer += dt;
             if (impl_->net_pos_timer >= 0.05f) {   // ~20 Hz
@@ -520,6 +522,12 @@ void Engine::run() {
                     auto bt = static_cast<BlockType>(ev.block_type);
                     impl_->world.setWorldBlock(ev.bx, ev.by, ev.bz, bt);
                     rebuildModified(ev.bx, ev.bz, *impl_->chunk_mgr);
+                } else if (ev.kind == NetworkEvent::Kind::TimeSync) {
+                    // サーバーの時刻に合わせる（小さなジャンプは許容）
+                    impl_->time_of_day = ev.time_of_day;
+                } else if (ev.kind == NetworkEvent::Kind::MobUpdate) {
+                    if (!is_mob_host)
+                        impl_->mob_mgr.setZombies(std::move(ev.mobs));
                 }
             }
             // Update walking animation phase for each remote player.
@@ -533,20 +541,48 @@ void Engine::run() {
                 float dz    = rp.z - rp.prev_z;
                 float speed = std::sqrt(dx * dx + dz * dz) / dt;
                 if (speed > 0.3f)
-                    rp.walk_phase += dt * 8.0f;  // ~1.3 full cycles/sec at normal walk
+                    rp.walk_phase += dt * 8.0f;
                 rp.prev_x = rp.x;
                 rp.prev_z = rp.z;
             }
         }
 
         // ── モブ更新 ────────────────────────────────────────────────────────
+        // ホスト（シングルプレイまたはplayer_id==1）のみ物理・AIを実行。
+        // 非ホストはサーバー経由で受け取ったzombies_をそのまま描画する。
         {
-            float dmg = impl_->mob_mgr.update(
-                dt,
-                ppos.x, ppos.y, ppos.z,
-                impl_->time_of_day,
-                isSolid,
-                impl_->world);
+            float dmg = 0.0f;
+            if (is_mob_host) {
+                // ホスト: mob AI を動かし、マルチプレイ中は状態を送信する
+                dmg = impl_->mob_mgr.update(
+                    dt,
+                    ppos.x, ppos.y, ppos.z,
+                    impl_->time_of_day,
+                    isSolid,
+                    impl_->world);
+                if (impl_->multiplayer) {
+                    impl_->mob_sync_timer -= dt;
+                    if (impl_->mob_sync_timer <= 0.0f) {
+                        impl_->mob_sync_timer = 0.1f;  // 10 Hz
+                        const auto& zs = impl_->mob_mgr.zombies();
+                        uint8_t count = (uint8_t)std::min((int)zs.size(), 255);
+                        std::vector<uint8_t> buf;
+                        buf.reserve(1 + count * sizeof(PktMobEntry));
+                        buf.push_back(count);
+                        for (uint8_t i = 0; i < count; ++i) {
+                            PktMobEntry e;
+                            e.x = zs[i].x; e.y = zs[i].y; e.z = zs[i].z;
+                            e.yaw = zs[i].yaw; e.health = zs[i].health;
+                            e.state = (uint8_t)zs[i].state;
+                            buf.insert(buf.end(),
+                                       reinterpret_cast<uint8_t*>(&e),
+                                       reinterpret_cast<uint8_t*>(&e) + sizeof(e));
+                        }
+                        impl_->net_client.sendRaw(PacketType::MobUpdate,
+                                                   buf.data(), (uint16_t)buf.size());
+                    }
+                }
+            }
             impl_->player_health -= dmg;
             if (impl_->player_health <= 0) {
                 // シンプルなリスポーン: 体力を全回復
@@ -587,6 +623,18 @@ void Engine::run() {
         frustum.extractFromVP(proj * view);  // Proj×View から視錐台の6平面を取り出す
 
         // ── 描画 ─────────────────────────────────────────────────────────────
+
+        // パス0: シャドウマップ生成 (太陽視点で深度のみ描画)
+        // カメラ外の地形(洞窟の天井など)も影を落とすため、全ロード済みチャンクを使う
+        impl_->renderer.updateShadowMatrix(ppos.x, ppos.y, ppos.z);
+        impl_->renderer.beginShadowPass();
+        {
+            auto all_chunks = impl_->chunk_mgr->getAllLoadedChunks();
+            for (Chunk* c : all_chunks)
+                impl_->renderer.drawChunkShadow(c);
+        }
+        impl_->renderer.endShadowPass();
+
         impl_->renderer.beginFrame();  // 画面をクリア
 
         // 空（スカイボックス）を最初に描画する（最も遠い背景として）

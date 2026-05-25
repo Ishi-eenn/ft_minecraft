@@ -23,6 +23,7 @@ public:
                           float front_x, float front_z);
 
     const std::vector<Zombie>& zombies() const { return zombies_; }
+    void setZombies(std::vector<Zombie> z) { zombies_ = std::move(z); }
 
 private:
     void trySpawn(float px, float pz, const World& world, float time_of_day);

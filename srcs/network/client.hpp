@@ -1,6 +1,7 @@
 #pragma once
 #include "network/tcp_socket.hpp"
 #include "network/packet.hpp"
+#include "mob/zombie.hpp"
 #include <cstdint>
 #include <map>
 #include <vector>
@@ -17,11 +18,15 @@ struct RemotePlayer {
 };
 
 struct NetworkEvent {
-    enum class Kind { BlockChange, PlayerDisconnect } kind;
+    enum class Kind { BlockChange, PlayerDisconnect, TimeSync, MobUpdate } kind;
     uint8_t  player_id  = 0;
     // BlockChange fields
     int      bx = 0, by = 0, bz = 0;
     uint8_t  block_type = 0;
+    // TimeSync
+    float    time_of_day = 0.0f;
+    // MobUpdate
+    std::vector<Zombie> mobs;
 };
 
 class NetworkClient {
@@ -38,6 +43,9 @@ public:
 
     // Send a block change immediately.
     void sendBlockChange(int x, int y, int z, uint8_t block_type);
+
+    // Send an arbitrary packet (for host→server mob updates etc.)
+    void sendRaw(PacketType type, const void* payload, uint16_t size);
 
     bool     isConnected() const { return sock_.isValid() && welcomed_; }
     uint8_t  playerId()    const { return player_id_; }

@@ -28,6 +28,10 @@ private:
 
     TcpSocket         listen_sock_;
     std::map<int, Client> clients_;
-    uint8_t  next_id_ = 1;
-    uint32_t seed_    = 42;
+    uint8_t  next_id_       = 1;
+    uint32_t seed_          = 42;
+    float    time_of_day_   = 0.35f;
+    float    time_sync_acc_ = 0.0f;   // 次のTimeSync送信までの残り秒
+    static constexpr float DAY_DURATION    = 600.0f;
+    static constexpr float TIME_SYNC_INTERVAL = 5.0f;
 };

@@ -31,6 +31,11 @@ void NetworkClient::sendBlockChange(int x, int y, int z, uint8_t block_type) {
     sendPacket(PacketType::BlockChange, &pkt, sizeof(pkt));
 }
 
+void NetworkClient::sendRaw(PacketType type, const void* payload, uint16_t size) {
+    if (!sock_.isValid()) return;
+    sendPacket(type, payload, size);
+}
+
 void NetworkClient::poll(std::vector<NetworkEvent>& out_events) {
     if (!sock_.isValid()) return;
 
@@ -101,6 +106,39 @@ void NetworkClient::handlePacket(PacketType type, const uint8_t* payload,
         ev.player_id = pkt.player_id;
         out.push_back(ev);
         fprintf(stderr, "[Client] player %u left\n", pkt.player_id);
+        break;
+    }
+    case PacketType::TimeSync: {
+        if (size < sizeof(PktTimeSync)) break;
+        PktTimeSync pkt;
+        std::memcpy(&pkt, payload, sizeof(pkt));
+        NetworkEvent ev;
+        ev.kind        = NetworkEvent::Kind::TimeSync;
+        ev.time_of_day = pkt.time_of_day;
+        out.push_back(ev);
+        break;
+    }
+    case PacketType::MobUpdate: {
+        if (size < 1) break;
+        uint8_t count = payload[0];
+        const uint8_t* p = payload + 1;
+        if (size < 1 + (uint16_t)count * sizeof(PktMobEntry)) break;
+        NetworkEvent ev;
+        ev.kind = NetworkEvent::Kind::MobUpdate;
+        ev.mobs.resize(count);
+        for (int i = 0; i < count; ++i) {
+            PktMobEntry entry;
+            std::memcpy(&entry, p, sizeof(entry));
+            p += sizeof(entry);
+            Zombie& z     = ev.mobs[i];
+            z.x           = entry.x;
+            z.y           = entry.y;
+            z.z           = entry.z;
+            z.yaw         = entry.yaw;
+            z.health      = entry.health;
+            z.state       = static_cast<Zombie::State>(entry.state);
+        }
+        out.push_back(std::move(ev));
         break;
     }
     default:

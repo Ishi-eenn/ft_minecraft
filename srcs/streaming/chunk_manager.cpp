@@ -294,6 +294,18 @@ void ChunkManager::rebuildChunkAt(ChunkPos pos) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// getAllLoadedChunks() — GPU メッシュを持つ全チャンクを返す（シャドウパス用）
+// ─────────────────────────────────────────────────────────────────────────────
+std::vector<Chunk*> ChunkManager::getAllLoadedChunks() const {
+    std::vector<Chunk*> result;
+    result.reserve(loaded_.size());
+    loaded_.forEach([&](const ChunkPos& /*pos*/, Chunk* chunk) {
+        if (chunk && chunk->gpu.uploaded)
+            result.push_back(chunk);
+    });
+    return result;
+}
+
 // getVisibleChunks() — フラスタムカリングで可視チャンクだけを返す
 // ─────────────────────────────────────────────────────────────────────────────
 std::vector<Chunk*> ChunkManager::getVisibleChunks(const Frustum& frustum) {

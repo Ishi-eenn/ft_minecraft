@@ -2,6 +2,7 @@
 #include "network/packet.hpp"
 
 #include <sys/select.h>
+#include <sys/time.h>
 #include <csignal>
 #include <cstdio>
 #include <cstring>
@@ -20,6 +21,9 @@ bool VoxServer::init(uint16_t port, uint32_t seed) {
 }
 
 void VoxServer::run() {
+    timeval prev_tv;
+    gettimeofday(&prev_tv, nullptr);
+
     while (g_running) {
         fd_set rfds;
         FD_ZERO(&rfds);
@@ -34,6 +38,26 @@ void VoxServer::run() {
         timeval tv{0, 10'000};   // 10 ms poll interval
         int ret = select(max_fd + 1, &rfds, nullptr, nullptr, &tv);
         if (ret < 0) break;
+
+        // 経過時間を計測して昼夜サイクルを進める
+        timeval now_tv;
+        gettimeofday(&now_tv, nullptr);
+        float dt = (float)(now_tv.tv_sec  - prev_tv.tv_sec) +
+                   (float)(now_tv.tv_usec - prev_tv.tv_usec) * 1e-6f;
+        prev_tv = now_tv;
+        if (dt > 0.1f) dt = 0.1f;  // 負荷スパイク対策
+
+        time_of_day_ += dt / DAY_DURATION;
+        if (time_of_day_ >= 1.0f) time_of_day_ -= 1.0f;
+
+        // 5秒ごとに全クライアントへ時刻をブロードキャスト
+        time_sync_acc_ -= dt;
+        if (time_sync_acc_ <= 0.0f && !clients_.empty()) {
+            time_sync_acc_ = TIME_SYNC_INTERVAL;
+            PktTimeSync pkt{time_of_day_};
+            broadcast(PacketType::TimeSync, &pkt, sizeof(pkt));
+        }
+
         if (ret == 0) continue;
 
         if (FD_ISSET(listen_sock_.fd(), &rfds)) acceptNew();
@@ -120,8 +144,13 @@ void VoxServer::handlePacket(int from_fd, PacketType type,
         if (size < sizeof(PktBlockChange)) break;
         PktBlockChange pkt;
         std::memcpy(&pkt, payload, sizeof(pkt));
-        // Broadcast to all including sender (so sender's world stays consistent).
-        broadcast(PacketType::BlockChange, &pkt, sizeof(pkt));
+        // 送信者を除いてブロードキャスト（送信者は既にローカルで適用済み）
+        broadcast(PacketType::BlockChange, &pkt, sizeof(pkt), from_fd);
+        break;
+    }
+    case PacketType::MobUpdate: {
+        // ホスト（player_id==1）からのモブ状態を他全員に中継
+        broadcast(PacketType::MobUpdate, payload, size, from_fd);
         break;
     }
     default:

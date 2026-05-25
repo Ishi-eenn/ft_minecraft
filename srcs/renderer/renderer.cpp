@@ -41,7 +41,10 @@ Renderer::~Renderer() {
     title_screen_.destroy();
     minimap_.destroy();
     chunk_shader_.destroy();
+    shadow_shader_.destroy();
     sky_shader_.destroy();
+    if (shadow_fbo_)       { glDeleteFramebuffers(1, &shadow_fbo_);  shadow_fbo_       = 0; }
+    if (shadow_depth_tex_) { glDeleteTextures(1, &shadow_depth_tex_); shadow_depth_tex_ = 0; }
     hud_shader_.destroy();
     entity_shader_.destroy();
     if (entity_vao_)  { glDeleteVertexArrays(1, &entity_vao_);  entity_vao_  = 0; }
@@ -91,10 +94,42 @@ bool Renderer::init(GLFWwindow* window) {
         std::cerr << "[Renderer] Failed to load chunk shaders\n";
         return false;
     }
+    if (!shadow_shader_.load("assets/shaders/shadow.vert", "assets/shaders/shadow.frag")) {
+        std::cerr << "[Renderer] Failed to load shadow shaders\n";
+        return false;
+    }
     if (!sky_shader_.load("assets/shaders/skybox.vert", "assets/shaders/skybox.frag")) {
         std::cerr << "[Renderer] Failed to load skybox shaders\n";
         return false;
     }
+
+    // ── シャドウマップ FBO の生成 ──────────────────────────────────────────────
+    // SHADOW_MAP_SIZE × SHADOW_MAP_SIZE の深度テクスチャに太陽視点の深度を記録する。
+    glGenFramebuffers(1, &shadow_fbo_);
+
+    glGenTextures(1, &shadow_depth_tex_);
+    glBindTexture(GL_TEXTURE_2D, shadow_depth_tex_);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24,
+                 SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, 0,
+                 GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    // シャドウマップのサンプリング設定
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // 範囲外は「影なし」として扱う (border = 1.0)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    float border_color[] = {1.0f, 1.0f, 1.0f, 1.0f};
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border_color);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, shadow_fbo_);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                           GL_TEXTURE_2D, shadow_depth_tex_, 0);
+    glDrawBuffer(GL_NONE);  // カラー出力なし (深度のみ)
+    glReadBuffer(GL_NONE);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        std::cerr << "[Renderer] Shadow FBO incomplete\n";
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
     // ── テクスチャアトラスの生成 ───────────────────────────────────────────────
     // 全ブロックの絵柄を1枚のテクスチャにまとめたもの（アトラス）
@@ -837,19 +872,35 @@ static void setChunkLightingUniforms(Shader& shader,
 void Renderer::drawChunk(const Chunk* chunk, const float* view4x4, const float* proj4x4) {
     if (!chunk->gpu.uploaded || chunk->gpu.idx_count == 0) return;
 
-    glm::mat4 mvp = buildMVP(chunk, view4x4, proj4x4);
+    glm::mat4 model = glm::translate(
+        glm::mat4(1.0f),
+        glm::vec3(
+            static_cast<float>(chunk->pos.x) * static_cast<float>(CHUNK_SIZE_X),
+            0.0f,
+            static_cast<float>(chunk->pos.z) * static_cast<float>(CHUNK_SIZE_Z)));
+    glm::mat4 mvp = glm::make_mat4(proj4x4) * glm::make_mat4(view4x4) * model;
 
     chunk_shader_.use();
-    chunk_shader_.setMat4("uMVP", glm::value_ptr(mvp));
+    chunk_shader_.setMat4("uMVP",          glm::value_ptr(mvp));
+    chunk_shader_.setMat4("uModel",        glm::value_ptr(model));
+    chunk_shader_.setMat4("uLightSpaceMat", light_space_mat_);
     setChunkLightingUniforms(chunk_shader_, sun_dir_, ambient_, sun_strength_);
-    atlas_.bind(0);                    // テクスチャスロット 0 にアトラスを bind
+    chunk_shader_.setFloat("uSunStrength", sun_strength_);
+
+    atlas_.bind(0);
     chunk_shader_.setInt("uAtlas", 0);
+
+    // シャドウマップをテクスチャスロット 1 にバインド
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, shadow_depth_tex_);
+    chunk_shader_.setInt("uShadowMap", 1);
+    glActiveTexture(GL_TEXTURE0);
 
     glBindVertexArray(chunk->gpu.vao);
     glDrawElements(GL_TRIANGLES,
                    static_cast<GLsizei>(chunk->gpu.idx_count),
                    GL_UNSIGNED_INT,
-                   nullptr);           // EBO の先頭から idx_count 個分
+                   nullptr);
     glBindVertexArray(0);
 }
 
@@ -865,13 +916,28 @@ void Renderer::drawChunk(const Chunk* chunk, const float* view4x4, const float* 
 void Renderer::drawChunkWater(const Chunk* chunk, const float* view4x4, const float* proj4x4) {
     if (!chunk->gpu.uploaded || chunk->gpu.idx_count_water == 0) return;
 
-    glm::mat4 mvp = buildMVP(chunk, view4x4, proj4x4);
+    glm::mat4 model = glm::translate(
+        glm::mat4(1.0f),
+        glm::vec3(
+            static_cast<float>(chunk->pos.x) * static_cast<float>(CHUNK_SIZE_X),
+            0.0f,
+            static_cast<float>(chunk->pos.z) * static_cast<float>(CHUNK_SIZE_Z)));
+    glm::mat4 mvp = glm::make_mat4(proj4x4) * glm::make_mat4(view4x4) * model;
 
     chunk_shader_.use();
-    chunk_shader_.setMat4("uMVP", glm::value_ptr(mvp));
+    chunk_shader_.setMat4("uMVP",          glm::value_ptr(mvp));
+    chunk_shader_.setMat4("uModel",        glm::value_ptr(model));
+    chunk_shader_.setMat4("uLightSpaceMat", light_space_mat_);
     setChunkLightingUniforms(chunk_shader_, sun_dir_, ambient_, sun_strength_);
+    chunk_shader_.setFloat("uSunStrength", sun_strength_);
+
     atlas_.bind(0);
     chunk_shader_.setInt("uAtlas", 0);
+
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, shadow_depth_tex_);
+    chunk_shader_.setInt("uShadowMap", 1);
+    glActiveTexture(GL_TEXTURE0);
 
     glDepthMask(GL_FALSE);  // 深度バッファへの書き込みを止める
 
@@ -911,6 +977,92 @@ void Renderer::drawSkybox(const float* view3x3, const float* proj4x4) {
 void Renderer::drawClouds(const float* view4x4, const float* proj4x4,
                           float cam_x, float cam_z, float elapsed_s) {
     cloud_.draw(view4x4, proj4x4, cam_x, cam_z, elapsed_s, sun_dir_);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// updateShadowMatrix() — 光源空間行列 (LightProj × LightView) を計算する
+//
+// 太陽方向 (sun_dir_) とプレイヤー位置からオーソグラフィック射影行列を作る。
+// この行列でチャンクを描くと「太陽から見た深度マップ」になる。
+//
+// 【オーソグラフィック射影】
+//   遠近感がない平行投影。太陽は無限遠にあるので、この投影が適切。
+// ─────────────────────────────────────────────────────────────────────────────
+void Renderer::updateShadowMatrix(float px, float py, float pz) {
+    glm::vec3 sunDir  = glm::normalize(glm::vec3(sun_dir_[0], sun_dir_[1], sun_dir_[2]));
+    glm::vec3 playerPos = glm::vec3(px, py, pz);
+
+    // 光源位置: 太陽方向にプレイヤーから 350 ブロック離れた点
+    glm::vec3 lightPos = playerPos + sunDir * 350.0f;
+
+    // 上ベクトル: 太陽が真上/真下に近いときは別軸を使う
+    glm::vec3 up = (std::abs(sunDir.y) > 0.98f)
+                   ? glm::vec3(1.0f, 0.0f, 0.0f)
+                   : glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::mat4 lightView = glm::lookAt(lightPos, playerPos, up);
+
+    // 描画距離 (160ブロック) をカバーする直交ボックス
+    constexpr float RANGE = 200.0f;
+    glm::mat4 lightProj   = glm::ortho(-RANGE, RANGE, -RANGE, RANGE, 1.0f, 750.0f);
+
+    glm::mat4 lsMat = lightProj * lightView;
+    std::memcpy(light_space_mat_, glm::value_ptr(lsMat), 16 * sizeof(float));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// beginShadowPass() — シャドウパスの開始
+//
+// シャドウ用 FBO に切り替え、太陽視点で深度のみ描画する準備をする。
+// ─────────────────────────────────────────────────────────────────────────────
+void Renderer::beginShadowPass() {
+    glBindFramebuffer(GL_FRAMEBUFFER, shadow_fbo_);
+    glViewport(0, 0, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    // ポリゴンオフセット: シャドウマップの深度値を傾きに応じてわずかにずらす。
+    // これにより surface 自身が自分の影を描くself-shadowingを防ぐ。
+    // ボクセルメッシュでは glCullFace(GL_FRONT) を使うと地形の上面(影の元)が
+    // シャドウマップから除外されてしまうため、通常の GL_BACK カリングのままにする。
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(2.0f, 4.0f);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// drawChunkShadow() — シャドウパスでのチャンク描画
+//
+// shadow_shader_ (position のみ) で描画し、深度バッファに書き込む。
+// ─────────────────────────────────────────────────────────────────────────────
+void Renderer::drawChunkShadow(const Chunk* chunk) {
+    if (!chunk->gpu.uploaded || chunk->gpu.idx_count == 0) return;
+
+    glm::mat4 model = glm::translate(
+        glm::mat4(1.0f),
+        glm::vec3(
+            static_cast<float>(chunk->pos.x) * static_cast<float>(CHUNK_SIZE_X),
+            0.0f,
+            static_cast<float>(chunk->pos.z) * static_cast<float>(CHUNK_SIZE_Z)));
+    glm::mat4 lightMVP = glm::make_mat4(light_space_mat_) * model;
+
+    shadow_shader_.use();
+    shadow_shader_.setMat4("uLightMVP", glm::value_ptr(lightMVP));
+
+    glBindVertexArray(chunk->gpu.vao);
+    glDrawElements(GL_TRIANGLES,
+                   static_cast<GLsizei>(chunk->gpu.idx_count),
+                   GL_UNSIGNED_INT,
+                   nullptr);
+    glBindVertexArray(0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// endShadowPass() — シャドウパスの終了
+//
+// デフォルト FBO に戻し、ビューポートをウィンドウサイズに復元する。
+// ─────────────────────────────────────────────────────────────────────────────
+void Renderer::endShadowPass() {
+    glDisable(GL_POLYGON_OFFSET_FILL);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, width_, height_);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
