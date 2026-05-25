@@ -4,6 +4,7 @@
 #include "renderer/texture_atlas.hpp"
 #include "renderer/frustum.hpp"
 #include "renderer/skybox.hpp"
+#include "renderer/cloud.hpp"
 #include "renderer/title_screen.hpp"
 #include "renderer/minimap.hpp"
 #include "mob/zombie.hpp"
@@ -27,6 +28,8 @@ public:
     void drawChunk(const Chunk* chunk, const float* view4x4, const float* proj4x4) override;
     void drawChunkWater(const Chunk* chunk, const float* view4x4, const float* proj4x4);
     void drawSkybox(const float* view3x3, const float* proj4x4) override;
+    void drawClouds(const float* view4x4, const float* proj4x4,
+                    float cam_x, float cam_z, float elapsed_s);
     void drawHud(int fps, int px, int py, int pz);
     void drawUnderwaterOverlay();
     bool drawTitleScreen(float dt);
@@ -63,6 +66,8 @@ private:
     Skybox       skybox_;
     Frustum      frustum_;
     int          width_ = 1280, height_ = 720;
+
+    Cloud        cloud_;
 
     TitleScreen  title_screen_;
     Minimap      minimap_;

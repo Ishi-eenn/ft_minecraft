@@ -69,7 +69,7 @@ static void getAtlasUV(BlockType type, Face face, float& u0, float& v0, float& u
     if (type == BlockType::Grass) {
         if      (face == Face::Top)    tile = 1;  // 上面: 緑の草
         else if (face == Face::Bottom) tile = 2;  // 下面: 土
-        else                           tile = 9;  // 側面: 草付き土（col=1, row=1）
+        else                           tile = 10; // 側面: 草付き土（col=2, row=1）
     }
     // タイルインデックス → UV座標
     u0 = (float)(tile % cols) / (float)cols;

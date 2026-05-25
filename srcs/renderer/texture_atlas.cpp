@@ -377,6 +377,42 @@ static void fillSolid(uint8_t* buf, int atlas_w, int tile_col, int tile_row,
             setPixel(buf, atlas_w, ox, oy, px, py, r, g, b, a);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// fillCactus() — サボテンのテクスチャを生成する
+//
+// 濃い緑の縦縞模様で、サボテンのリブ（肋骨状の凸凹）を表現する。
+// ─────────────────────────────────────────────────────────────────────────────
+static void fillCactus(uint8_t* buf, int atlas_w, int tile_col, int tile_row) {
+    const int tw = ATLAS_TILE_SIZE;
+    const int ox = tile_col * tw;
+    const int oy = tile_row * tw;
+
+    for (int py = 0; py < tw; ++py) {
+        for (int px = 0; px < tw; ++px) {
+            int n = hash2(px, py, 503);
+
+            int r = 44  + (n - 128) * 8 / 128;
+            int g = 110 + (n - 128) * 20 / 128;
+            int b = 30  + (n - 128) * 6 / 128;
+
+            // 縦リブ（3ピクセル間隔の明るい縞）
+            if (px % 3 == 1) {
+                r += 12;
+                g += 22;
+                b += 8;
+            }
+            // 横の節（4ピクセル間隔の暗い線）
+            if (py % 4 == 0) {
+                r -= 10;
+                g -= 18;
+                b -= 6;
+            }
+
+            setPixel(buf, atlas_w, ox, oy, px, py, r, g, b);
+        }
+    }
+}
+
 } // anonymous namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -403,8 +439,9 @@ bool TextureAtlas::generate() {
     fillSnow (pixels, atlas_w, 5, 0);                // Snow
     fillWater(pixels, atlas_w, 6, 0);                // Water
     fillWood (pixels, atlas_w, 7, 0);                // Wood (trunk)
-    fillLeaves   (pixels, atlas_w, 0, 1);            // Leaves (row 1)
-    fillGrassSide(pixels, atlas_w, 1, 1);            // GrassSide (col=1, row=1)
+    fillLeaves   (pixels, atlas_w, 0, 1);            // Leaves  (col=0, row=1) tile=8
+    fillCactus   (pixels, atlas_w, 1, 1);            // Cactus  (col=1, row=1) tile=9
+    fillGrassSide(pixels, atlas_w, 2, 1);            // GrassSide (col=2, row=1) tile=10
 
     // GPU にテクスチャを作成して転送する
     glGenTextures(1, &tex_id_);

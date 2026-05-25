@@ -327,6 +327,7 @@ void Engine::run() {
     int   fps_frames      = 0;
     int   fps_display     = 0;
     float rd_adjust_timer = 0.0f;  // レンダー距離調整のクールダウンタイマー（秒）
+    float elapsed_s       = 0.0f;  // 起動からの経過秒数（雲アニメーション用）
 
     while (running_) {
         // ── デルタタイム計算 ──────────────────────────────────────────────────
@@ -340,6 +341,7 @@ void Engine::run() {
         if (dt > 0.1f) dt = 0.1f;
         fps_timer       += dt;
         rd_adjust_timer += dt;
+        elapsed_s       += dt;
         ++fps_frames;
         // 0.25秒ごとにFPSを更新（毎フレーム更新すると数字が激しく変わって読めない）
         if (fps_timer >= 0.25f) {
@@ -564,6 +566,9 @@ void Engine::run() {
 
         // モブ（ゾンビ）を描画
         impl_->renderer.drawMobs(impl_->mob_mgr.zombies(), view4x4, proj4x4);
+
+        // 3D 雲レイヤーを描画（不透明ブロックの後、水の前）
+        impl_->renderer.drawClouds(view4x4, proj4x4, ppos.x, ppos.z, elapsed_s);
 
         // パス2: 水（半透明）を描画
         // 深度バッファには書き込まない（読むだけ）。

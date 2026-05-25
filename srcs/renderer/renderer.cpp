@@ -53,6 +53,7 @@ Renderer::~Renderer() {
     if (overlay_vbo_) { glDeleteBuffers(1, &overlay_vbo_);      overlay_vbo_ = 0; }
     atlas_.destroy();
     skybox_.destroy();
+    cloud_.destroy();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -101,6 +102,10 @@ bool Renderer::init(GLFWwindow* window) {
     // 世界を取り囲む巨大な立方体として空を描く
     if (!skybox_.init()) {
         std::cerr << "[Renderer] Failed to initialise skybox\n";
+        return false;
+    }
+    if (!cloud_.init()) {
+        std::cerr << "[Renderer] Failed to initialise clouds\n";
         return false;
     }
 
@@ -670,6 +675,14 @@ void Renderer::drawSkybox(const float* view3x3, const float* proj4x4) {
     sky_shader_.setVec3("uSunDir",      sun_dir_[0],     sun_dir_[1],     sun_dir_[2]);
     sky_shader_.setVec3("uSunColor",    sun_color_[0],   sun_color_[1],   sun_color_[2]);
     skybox_.draw(view3x3, proj4x4, sky_shader_);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// drawClouds() — 3D 雲レイヤーを描画する
+// ─────────────────────────────────────────────────────────────────────────────
+void Renderer::drawClouds(const float* view4x4, const float* proj4x4,
+                          float cam_x, float cam_z, float elapsed_s) {
+    cloud_.draw(view4x4, proj4x4, cam_x, cam_z, elapsed_s, sun_dir_);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
