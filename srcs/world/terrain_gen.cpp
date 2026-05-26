@@ -116,6 +116,135 @@ static int computeTerrainHeight(const NoiseGen& noise, int wx, int wz) {
     return std::clamp(s, 2, CHUNK_SIZE_Y - 2);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Rivers
+//
+// Rivers are generated from sparse world-space "stripes" that drift sideways
+// with low-frequency value noise. Because the centreline depends only on world
+// coordinates and seed, it stays continuous across chunk boundaries.
+// ─────────────────────────────────────────────────────────────────────────────
+struct RiverInfo {
+    bool  active      = false;  // inside river bank influence
+    bool  has_water   = false;  // inside wet channel
+    int   land_y      = 0;      // lowered bank surface when has_water=false
+    int   water_y     = 0;      // top water block
+    int   bed_y       = 0;      // solid block directly under the water
+    float bank_factor = 0.0f;   // 0 at outside edge, 1 at centre
+};
+
+static float smoothHashNoise(uint32_t seed, float x, float z) {
+    int ix = (int)std::floor(x);
+    int iz = (int)std::floor(z);
+    float fx = x - (float)ix;
+    float fz = z - (float)iz;
+    fx = fx * fx * (3.0f - 2.0f * fx);
+    fz = fz * fz * (3.0f - 2.0f * fz);
+
+    auto sample = [&](int sx, int sz) {
+        uint32_t h = hash3(sx, (int)seed, sz);
+        return ((float)(h & 0x00ffffffu) / 8388607.5f) - 1.0f;
+    };
+
+    float a = sample(ix,     iz);
+    float b = sample(ix + 1, iz);
+    float c = sample(ix,     iz + 1);
+    float d = sample(ix + 1, iz + 1);
+    float ab = a + (b - a) * fx;
+    float cd = c + (d - c) * fx;
+    return ab + (cd - ab) * fz;
+}
+
+static float riverFbm(uint32_t seed, float x, float z) {
+    float sum = 0.0f;
+    float amp = 0.55f;
+    float norm = 0.0f;
+    for (int i = 0; i < 4; ++i) {
+        sum += smoothHashNoise(seed + (uint32_t)i * 131u, x, z) * amp;
+        norm += amp;
+        x *= 2.03f;
+        z *= 2.03f;
+        amp *= 0.52f;
+    }
+    return sum / norm;
+}
+
+static void evalRiverFamily(float wx, float wz, uint32_t seed, bool vertical,
+                            float& best_dist, float& best_width) {
+    constexpr float SPACING = 320.0f;
+
+    float across = vertical ? wx : wz;
+    float along  = vertical ? wz : wx;
+    int base_cell = (int)std::floor(across / SPACING);
+
+    for (int cell = base_cell - 1; cell <= base_cell + 1; ++cell) {
+        uint32_t h = hash3(cell, (int)(seed ^ (vertical ? 0x72697658u : 0x7269765Au)),
+                           vertical ? 17 : 31);
+        if ((h % 100u) >= 72u) continue;
+
+        float jitter = ((float)((h >> 8) & 1023u) / 1023.0f - 0.5f) * SPACING * 0.36f;
+        float centre = ((float)cell + 0.5f) * SPACING + jitter;
+        float meander =
+            riverFbm(seed ^ (vertical ? 0xA771CEu : 0xB771CEu),
+                     along * 0.0060f, (float)cell * 4.17f) * 46.0f +
+            riverFbm(seed ^ (vertical ? 0xC0FFEEu : 0x51DE5u),
+                     along * 0.0210f, (float)cell * 8.31f) * 13.0f;
+
+        float dist = std::abs(across - (centre + meander));
+        float width = 5.5f + (float)((h >> 20) & 7u) * 0.65f;
+        if (dist < best_dist) {
+            best_dist = dist;
+            best_width = width;
+        }
+    }
+}
+
+static RiverInfo computeRiver(uint32_t seed, int wx, int wz, int surface) {
+    RiverInfo river;
+    river.land_y = surface;
+
+    if (surface >= CHUNK_SIZE_Y - 5)
+        return river;
+
+    float best_dist = 1.0e9f;
+    float water_width = 0.0f;
+    evalRiverFamily((float)wx, (float)wz, seed, true,  best_dist, water_width);
+    evalRiverFamily((float)wx, (float)wz, seed, false, best_dist, water_width);
+
+    const int water_level = SEA_LEVEL;
+    const float bank_span = std::max(10.0f, (float)std::max(0, surface - water_level) * 0.85f);
+    const bool coastal = surface <= water_level + 3;
+    const float channel_width = coastal ? water_width + 3.0f : water_width;
+
+    if (coastal && best_dist > channel_width)
+        return river;
+
+    if (!coastal && best_dist > water_width + bank_span)
+        return river;
+
+    river.active = true;
+    river.bank_factor = coastal
+        ? 1.0f
+        : 1.0f - std::clamp(best_dist / (water_width + bank_span), 0.0f, 1.0f);
+
+    if (best_dist <= channel_width) {
+        float centre_factor = 1.0f - std::clamp(best_dist / channel_width, 0.0f, 1.0f);
+        int depth = 2 + (int)std::round(centre_factor * 3.0f);
+        river.has_water = true;
+        river.water_y = std::clamp(water_level, 2, CHUNK_SIZE_Y - 3);
+        int target_bed = river.water_y - depth;
+        river.bed_y = std::max(1, std::min(surface, target_bed));
+        river.land_y = river.bed_y;
+    } else {
+        if (surface <= water_level + 1)
+            return RiverInfo{};
+        float bank_t = 1.0f - (best_dist - water_width) / bank_span;
+        int max_cut = std::max(1, surface - (water_level + 1));
+        int bank_cut = (int)std::round(std::pow(bank_t, 1.35f) * (float)max_cut);
+        river.land_y = std::max(water_level + 1, surface - bank_cut);
+    }
+    return river;
+}
+
 // 指定座標に木を配置できるか判定する。
 // allow_dirt=true のとき Dirt 地表にも配置可能（沼地用）。
 static bool canPlaceTreeAt(const Chunk& chunk, int x, int z, int surface,
@@ -949,7 +1078,9 @@ static BlockType oreAt(int wx, int wy, int wz, uint32_t seed) {
 // ─────────────────────────────────────────────────────────────────────────────
 static void carveSphere(Chunk& chunk, int chunk_wx, int chunk_wz,
                         float cx, float cy, float cz,
-                        float rx, float ry, float rz) {
+                        float rx, float ry, float rz,
+                        const NoiseGen* noise = nullptr,
+                        uint32_t seed = 0) {
     int min_x = (int)std::floor(cx - rx - 1.0f);
     int max_x = (int)std::ceil (cx + rx + 1.0f);
     int min_y = (int)std::floor(cy - ry - 1.0f);
@@ -963,8 +1094,19 @@ static void carveSphere(Chunk& chunk, int chunk_wx, int chunk_wz,
             int lz = wz - chunk_wz;
             if (lx < 0 || lx >= CHUNK_SIZE_X || lz < 0 || lz >= CHUNK_SIZE_Z)
                 continue;
+
+            RiverInfo river;
+            bool protect_river_surface = false;
+            if (noise) {
+                int surface = computeTerrainHeight(*noise, wx, wz);
+                river = computeRiver(seed, wx, wz, surface);
+                protect_river_surface = river.active;
+            }
+
             for (int wy = min_y; wy <= max_y; ++wy) {
                 if (wy <= 1 || wy >= CHUNK_SIZE_Y - 1) continue;
+                if (protect_river_surface && wy >= river.land_y - 4)
+                    continue;
 
                 float dx = ((float)wx + 0.5f - cx) / rx;
                 float dy = ((float)wy + 0.5f - cy) / ry;
@@ -1014,7 +1156,7 @@ static void carveSurfaceCaveEntrances(Chunk& chunk, const NoiseGen& noise,
                         (float)mouth_wx + 0.5f,
                         (float)surface - 0.8f,
                         (float)mouth_wz + 0.5f,
-                        3.2f, 2.8f, 3.2f);
+                        3.2f, 2.8f, 3.2f, &noise, seed);
 
             float end_x = (float)mouth_wx;
             float end_y = (float)surface - depth;
@@ -1030,7 +1172,8 @@ static void carveSurfaceCaveEntrances(Chunk& chunk, const NoiseGen& noise,
 
                 carveSphere(chunk, chunk_wx, chunk_wz,
                             cx + 0.5f, cy, cz + 0.5f,
-                            2.3f + mouth_bonus, 2.1f, 2.3f + mouth_bonus);
+                            2.3f + mouth_bonus, 2.1f, 2.3f + mouth_bonus,
+                            &noise, seed);
                 end_x = cx;
                 end_y = cy;
                 end_z = cz;
@@ -1039,14 +1182,14 @@ static void carveSurfaceCaveEntrances(Chunk& chunk, const NoiseGen& noise,
             // 行き止まりに見えないよう、下部に小部屋と横穴を作る。
             carveSphere(chunk, chunk_wx, chunk_wz,
                         end_x + 0.5f, end_y, end_z + 0.5f,
-                        4.2f, 3.0f, 4.2f);
+                        4.2f, 3.0f, 4.2f, &noise, seed);
             for (int i = 0; i <= 16; ++i) {
                 float t = (float)i / 16.0f;
                 carveSphere(chunk, chunk_wx, chunk_wz,
                             end_x + side_x * 13.0f * t + 0.5f,
                             end_y - 1.5f + std::sin(t * 3.1415926f) * 1.2f,
                             end_z + side_z * 13.0f * t + 0.5f,
-                            2.0f, 1.8f, 2.0f);
+                            2.0f, 1.8f, 2.0f, &noise, seed);
             }
         }
     }
@@ -1072,6 +1215,8 @@ void TerrainGenerator::generate(Chunk& chunk) const {
     for (int x = 0; x < CHUNK_SIZE_X; ++x) {
         for (int z = 0; z < CHUNK_SIZE_Z; ++z) {
             int surface = heights[x + 1][z + 1];
+            RiverInfo river = computeRiver(seed_, world_x + x, world_z + z, surface);
+            int land_surface = river.active ? river.land_y : surface;
 
             int max_diff = std::max({
                 std::abs(surface - heights[x + 1][z + 2]),
@@ -1108,20 +1253,31 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             for (int y = 0; y < CHUNK_SIZE_Y; ++y) {
                 BlockType t = BlockType::Air;
 
-                if (y == 0) {
+                if (river.has_water) {
+                    if (y == 0) {
+                        t = BlockType::Stone;
+                    } else if (y < river.bed_y) {
+                        int depth = river.bed_y - y;
+                        t = (depth <= 3) ? BlockType::Dirt : BlockType::Stone;
+                    } else if (y == river.bed_y) {
+                        t = BlockType::Sand;
+                    } else if (y <= river.water_y) {
+                        t = BlockType::Water;
+                    }
+                } else if (y == 0) {
                     t = BlockType::Stone;
-                } else if (y < surface) {
-                    int depth = surface - y;
+                } else if (y < land_surface) {
+                    int depth = land_surface - y;
                     t = (depth <= sub_depth) ? sub_t : BlockType::Stone;
-                } else if (y == surface) {
+                } else if (y == land_surface) {
                     t = top;
                 } else if (y > surface && y <= SEA_LEVEL && surface < SEA_LEVEL) {
                     t = BlockType::Water;
                 }
 
-                if (t != BlockType::Air && t != BlockType::Water && y > 5) {
+                if (!river.active && t != BlockType::Air && t != BlockType::Water && y > 5) {
                     float fy    = (float)y;
-                    float depth = (float)(surface - y);
+                    float depth = (float)(land_surface - y);
 
                     // ── 地下トンネル層（depth 10以深）─────────────────────────
                     // スパゲッティ方式（n1²+n2²<threshold）で斜めトンネルを生成。
