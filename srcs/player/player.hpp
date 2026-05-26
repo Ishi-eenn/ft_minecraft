@@ -15,6 +15,7 @@ public:
     void update(float dt,
                 const std::function<bool(int,int,int)>& isSolid,
                 const std::function<bool(int,int,int)>& isWater);
+    void pollInputOnly();
 
     Camera&       camera()       { return camera_; }
     const Camera& camera() const { return camera_; }
@@ -23,6 +24,7 @@ public:
     ChunkPos chunkPos() const;
     bool isFlyMode()  const { return fly_mode_; }
     bool isInWater()  const { return in_water_; }
+    void respawnAtInitial();
 
     bool shouldClose() const { return input_.shouldClose(); }
     bool wasResized()  const { return input_.wasResized(); }

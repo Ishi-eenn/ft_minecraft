@@ -26,6 +26,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include <array>
+#include <algorithm>
 #include <cstdio>
 #include <iostream>
 #include <cstring>
@@ -415,6 +416,13 @@ void Renderer::appendLetter(float* verts, int& count, char letter,
             appendLine(verts, count, left, top, left, bot);
             appendLine(verts, count, left, bot, right, bot);
             break;
+        case 'D':
+            appendLine(verts, count, left, top, left, bot);
+            appendLine(verts, count, left, top, right - w * 0.15f, top);
+            appendLine(verts, count, right - w * 0.15f, top, right, mid);
+            appendLine(verts, count, right, mid, right - w * 0.15f, bot);
+            appendLine(verts, count, right - w * 0.15f, bot, left, bot);
+            break;
         case 'E':
             appendLine(verts, count, left, top, left, bot);
             appendLine(verts, count, left, top, right, top);
@@ -445,6 +453,11 @@ void Renderer::appendLetter(float* verts, int& count, char letter,
             appendLine(verts, count, left, top, left, bot);
             appendLine(verts, count, left, bot, right, bot);
             break;
+        case 'N':
+            appendLine(verts, count, left, top, left, bot);
+            appendLine(verts, count, right, top, right, bot);
+            appendLine(verts, count, left, top, right, bot);
+            break;
         case 'R':
             appendLine(verts, count, left, top, left, bot);
             appendLine(verts, count, left, top, right, top);
@@ -473,6 +486,12 @@ void Renderer::appendLetter(float* verts, int& count, char letter,
             appendLine(verts, count, left, top, left, bot);
             appendLine(verts, count, right, top, right, bot);
             appendLine(verts, count, left, bot, right, bot);
+            break;
+        case 'W':
+            appendLine(verts, count, left, top, left + w * 0.18f, bot);
+            appendLine(verts, count, left + w * 0.18f, bot, (left + right) * 0.5f, mid);
+            appendLine(verts, count, (left + right) * 0.5f, mid, right - w * 0.18f, bot);
+            appendLine(verts, count, right - w * 0.18f, bot, right, top);
             break;
         case 'X':
             appendLine(verts, count, left, top,   right, bot);   // 左上→右下
@@ -518,11 +537,37 @@ void Renderer::appendSignedNumberLeft(float* verts, int& count, int value,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// appendHeart() — HUD 用の簡易ハート形状をラインで描く
+// ─────────────────────────────────────────────────────────────────────────────
+void Renderer::appendHeart(float* verts, int& count,
+                           float left, float top, float w, float h) const {
+    const float x0 = left;
+    const float x1 = left + w * 0.22f;
+    const float x2 = left + w * 0.50f;
+    const float x3 = left + w * 0.78f;
+    const float x4 = left + w;
+
+    const float y0 = top - h * 0.34f;
+    const float y1 = top;
+    const float y2 = top - h * 0.22f;
+    const float y4 = top - h;
+
+    appendLine(verts, count, x2, y4, x0, y2);
+    appendLine(verts, count, x0, y2, x1, y1);
+    appendLine(verts, count, x1, y1, x2, y0);
+    appendLine(verts, count, x2, y0, x3, y1);
+    appendLine(verts, count, x3, y1, x4, y2);
+    appendLine(verts, count, x4, y2, x2, y4);
+    appendLine(verts, count, x1, y2, x3, y2);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // drawHud() — 照準・FPS・座標を画面に描く
 //
-// 毎フレーム呼ばれ、照準（十字線）・右上のFPS・左上の座標をラインとして描画する。
+// 毎フレーム呼ばれ、照準・FPS・座標・HPをラインとして描画する。
 // ─────────────────────────────────────────────────────────────────────────────
-void Renderer::drawHud(int fps, int px, int py, int pz) {
+void Renderer::drawHud(int fps, int px, int py, int pz,
+                       float health, float max_health) {
     std::array<float, 2048> verts{};
     int count = 0;
 
@@ -589,6 +634,48 @@ void Renderer::drawHud(int fps, int px, int py, int pz) {
     hud_shader_.setVec4("uColor", 1.0f, 1.0f, 1.0f, 0.9f);  // 白色
     glBindVertexArray(hud_vao_);
     glDrawArrays(GL_LINES, 0, count / 2);
+
+    // HP ハート表示（Minecraft 風にホットバー直上へ配置）
+    const float safe_max_health = std::max(max_health, 1.0f);
+    const float hp = std::clamp(health, 0.0f, safe_max_health);
+    const int max_hearts = std::max(1, std::min(10,
+        static_cast<int>(std::ceil(safe_max_health * 0.5f))));
+    const int filled_hearts = std::min(max_hearts,
+        static_cast<int>(std::ceil(hp * 0.5f)));
+
+    std::array<float, 512> heart_verts{};
+    int heart_count = 0;
+    constexpr float SLOT_PX = 52.0f;
+    constexpr float GAP_PX = 5.0f;
+    constexpr float BOTTOM_PX = 14.0f;
+    constexpr float HOTBAR_SLOTS = 9.0f;
+    const float hotbar_w_px = HOTBAR_SLOTS * SLOT_PX + (HOTBAR_SLOTS - 1.0f) * GAP_PX;
+    const float hotbar_left_px = (static_cast<float>(width_) - hotbar_w_px) * 0.5f;
+    const float heart_w = 15.0f / hw;
+    const float heart_h = 14.0f / hh;
+    const float heart_gap = 3.0f / hw;
+    const float heart_left = hotbar_left_px / hw - 1.0f;
+    const float heart_top = -1.0f + (BOTTOM_PX + SLOT_PX + 28.0f) / hh;
+
+    for (int i = 0; i < max_hearts; ++i) {
+        appendHeart(heart_verts.data(), heart_count,
+                    heart_left + static_cast<float>(i) * (heart_w + heart_gap),
+                    heart_top, heart_w, heart_h);
+    }
+    glBufferSubData(GL_ARRAY_BUFFER, 0, heart_count * sizeof(float), heart_verts.data());
+    hud_shader_.setVec4("uColor", 0.0f, 0.0f, 0.0f, 0.82f);
+    glDrawArrays(GL_LINES, 0, heart_count / 2);
+
+    heart_count = 0;
+    for (int i = 0; i < filled_hearts; ++i) {
+        appendHeart(heart_verts.data(), heart_count,
+                    heart_left + static_cast<float>(i) * (heart_w + heart_gap),
+                    heart_top, heart_w, heart_h);
+    }
+    glBufferSubData(GL_ARRAY_BUFFER, 0, heart_count * sizeof(float), heart_verts.data());
+    hud_shader_.setVec4("uColor", 0.95f, 0.08f, 0.10f, 0.95f);
+    glDrawArrays(GL_LINES, 0, heart_count / 2);
+
     glBindVertexArray(0);
     glEnable(GL_DEPTH_TEST);
 }
@@ -752,6 +839,80 @@ void Renderer::drawPlayerList(uint8_t local_id,
     glBufferSubData(GL_ARRAY_BUFFER, 0, count * sizeof(float), verts.data());
 
     hud_shader_.setVec4("uColor", 0.92f, 0.98f, 1.0f, 0.92f);
+    glBindVertexArray(hud_vao_);
+    glDrawArrays(GL_LINES, 0, count / 2);
+    glBindVertexArray(0);
+    glEnable(GL_DEPTH_TEST);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// drawDeathScreen() — 死亡時の暗転オーバーレイと復活ボタンを描く
+// ─────────────────────────────────────────────────────────────────────────────
+void Renderer::drawDeathScreen() {
+    const float hw = static_cast<float>(width_)  * 0.5f;
+    const float hh = static_cast<float>(height_) * 0.5f;
+
+    auto drawQuad = [&](float qx0, float qy0, float qx1, float qy1,
+                        float r, float g, float b, float a) {
+        float q[12] = {
+            qx0, qy0, qx1, qy0, qx1, qy1,
+            qx0, qy0, qx1, qy1, qx0, qy1
+        };
+        glBindBuffer(GL_ARRAY_BUFFER, hotbar_vbo_);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(q), q);
+        hud_shader_.setVec4("uColor", r, g, b, a);
+        glBindVertexArray(hotbar_vao_);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+    };
+
+    glDisable(GL_DEPTH_TEST);
+    hud_shader_.use();
+
+    drawQuad(-1.0f, -1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.68f);
+
+    const float btn_w = 300.0f / hw;
+    const float btn_h = 56.0f / hh;
+    const float btn_x0 = -btn_w * 0.5f;
+    const float btn_x1 =  btn_w * 0.5f;
+    const float btn_y1 = -0.10f;
+    const float btn_y0 = btn_y1 - btn_h;
+    drawQuad(btn_x0, btn_y0, btn_x1, btn_y1, 0.13f, 0.14f, 0.16f, 0.92f);
+    drawQuad(btn_x0, btn_y1 - 4.0f / hh, btn_x1, btn_y1,
+             0.75f, 0.10f, 0.10f, 0.95f);
+
+    std::array<float, 2048> verts{};
+    int count = 0;
+
+    auto appendWordCentered = [&](const char* word, float center_x, float top,
+                                  float w, float h, float gap) {
+        int visible = 0;
+        for (int i = 0; word[i] != '\0'; ++i)
+            if (word[i] != ' ') ++visible;
+        int spaces = 0;
+        for (int i = 0; word[i] != '\0'; ++i)
+            if (word[i] == ' ') ++spaces;
+        float total = static_cast<float>(visible) * w
+            + static_cast<float>(visible + spaces - 1) * gap
+            + static_cast<float>(spaces) * w * 0.55f;
+        float x = center_x - total * 0.5f;
+        for (int i = 0; word[i] != '\0'; ++i) {
+            if (word[i] == ' ') {
+                x += w * 0.55f + gap;
+                continue;
+            }
+            appendLetter(verts.data(), count, word[i], x, top, w, h);
+            x += w + gap;
+        }
+    };
+
+    appendWordCentered("YOU DIED", 0.0f, 0.42f,
+                       34.0f / hw, 54.0f / hh, 12.0f / hw);
+    appendWordCentered("RESPAWN", 0.0f, btn_y0 + btn_h * 0.66f,
+                       16.0f / hw, 24.0f / hh, 7.0f / hw);
+
+    glBindBuffer(GL_ARRAY_BUFFER, hud_vbo_);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, count * sizeof(float), verts.data());
+    hud_shader_.setVec4("uColor", 0.95f, 0.08f, 0.10f, 0.96f);
     glBindVertexArray(hud_vao_);
     glDrawArrays(GL_LINES, 0, count / 2);
     glBindVertexArray(0);
@@ -1819,6 +1980,9 @@ void Renderer::drawRemotePlayers(const std::map<uint8_t, RemotePlayer>& players,
     for (auto& [id, rp] : players) {
         // Camera position → feet position (eye is 1.62 blocks above feet)
         static constexpr float EYE_H = 1.62f;
+        const bool dead = (rp.state_flags & 0x04u) != 0 || rp.health <= 0.0f;
+        const bool attacking = (rp.state_flags & 0x02u) != 0 ||
+                               rp.attack_timer > 0.0f;
 
         // Global transform: translate to feet, then rotate body to face yaw.
         // yaw=0 → front=(1,0,0) (+X); model default forward is +Z, so yaw-90°.
@@ -1827,9 +1991,16 @@ void Renderer::drawRemotePlayers(const std::map<uint8_t, RemotePlayer>& players,
         global = glm::rotate(global,
                               glm::radians(rp.yaw - 90.0f),
                               glm::vec3(0.f, 1.f, 0.f));
+        if (dead) {
+            global = glm::translate(global, glm::vec3(0.f, 0.18f, 0.f));
+            global = glm::rotate(global,
+                                  glm::radians(90.0f),
+                                  glm::vec3(1.f, 0.f, 0.f));
+        }
 
         // Walking animation: ±30° limb swing
-        const float swing = glm::radians(sinf(rp.walk_phase) * 30.0f);
+        const float swing = dead ? 0.0f : glm::radians(sinf(rp.walk_phase) * 30.0f);
+        const float attack_swing = (!dead && attacking) ? glm::radians(-85.0f) : 0.0f;
         const float* tc   = kTorsoColors[id % 6];
 
         // ── Head (no animation) ─────────────────────────────────────────────
@@ -1862,7 +2033,7 @@ void Renderer::drawRemotePlayers(const std::map<uint8_t, RemotePlayer>& players,
         {
             glm::vec3 sz(0.20f, 0.65f, 0.20f);
             glm::mat4 m = glm::translate(global, glm::vec3( 0.35f, 1.30f, 0.f));
-            m = glm::rotate(m,  swing, glm::vec3(1.f, 0.f, 0.f));
+            m = glm::rotate(m,  swing + attack_swing, glm::vec3(1.f, 0.f, 0.f));
             m = glm::translate(m, glm::vec3(0.f, -sz.y * 0.5f, 0.f));
             m = glm::scale(m, sz);
             drawStevePart(vp * m, m, kSkin);

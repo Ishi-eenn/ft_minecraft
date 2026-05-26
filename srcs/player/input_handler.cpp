@@ -74,6 +74,7 @@ void InputHandler::newFrame() {
     dy_ = 0.0f;
     left_clicked_  = false;
     right_clicked_ = false;
+    free_left_clicked_ = false;
     scroll_y_      = 0.0f;
 }
 
@@ -118,7 +119,10 @@ void InputHandler::keyCallback(GLFWwindow* w, int key, int /*sc*/, int action, i
 // キャプチャ中でない場合は無視する
 void InputHandler::cursorPosCallback(GLFWwindow* w, double xpos, double ypos) {
     auto* self = (InputHandler*)glfwGetWindowUserPointer(w);
-    if (!self || !self->cursor_captured_) return;
+    if (!self) return;
+    self->cursor_x_ = xpos;
+    self->cursor_y_ = ypos;
+    if (!self->cursor_captured_) return;
 
     if (self->first_) {
         // 最初のイベントでは差分を計算せず「基準位置」として記録するだけ
@@ -142,10 +146,14 @@ void InputHandler::mouseButtonCallback(GLFWwindow* w, int button, int action, in
 
     if (action == GLFW_PRESS) {
         if (button == GLFW_MOUSE_BUTTON_LEFT) {
-            if (!self->cursor_captured_)
-                self->captureCursor();   // カーソルが解放中なら左クリックで再キャプチャ
-            else
+            if (!self->cursor_captured_) {
+                glfwGetCursorPos(w, &self->cursor_x_, &self->cursor_y_);
+                self->free_left_clicked_ = true;
+                if (self->capture_on_click_)
+                    self->captureCursor();   // カーソルが解放中なら左クリックで再キャプチャ
+            } else {
                 self->left_clicked_ = true;  // キャプチャ中なら「ブロックを壊す」
+            }
         } else if (button == GLFW_MOUSE_BUTTON_RIGHT && self->cursor_captured_) {
             self->right_clicked_ = true;  // 右クリックで「ブロックを置く」
         }

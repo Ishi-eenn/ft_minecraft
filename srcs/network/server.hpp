@@ -39,6 +39,8 @@ private:
         char      name[16] = {};
         float     x = 0, y = 80, z = 0;
         float     yaw = 0, pitch = 0;
+        float     health = 20.0f;
+        uint8_t   state_flags = 0;
     };
 
     TcpSocket         listen_sock_;

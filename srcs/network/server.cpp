@@ -179,7 +179,8 @@ void VoxServer::handlePacket(int from_fd, PacketType type,
         // Send existing players' positions to the newcomer.
         for (auto& [fd, c] : clients_) {
             if (fd == from_fd) continue;
-            PktPlayerPos pp{c.id, c.x, c.y, c.z, c.yaw, c.pitch};
+            PktPlayerPos pp{c.id, c.x, c.y, c.z, c.yaw, c.pitch,
+                            c.health, c.state_flags};
             PacketHeader h2{PacketType::PlayerPos, sizeof(pp)};
             from.sock.sendRaw(&h2, sizeof(h2));
             from.sock.sendRaw(&pp, sizeof(pp));
@@ -196,6 +197,8 @@ void VoxServer::handlePacket(int from_fd, PacketType type,
         pkt.player_id = from.id;
         from.x = pkt.x;  from.y = pkt.y;  from.z = pkt.z;
         from.yaw = pkt.yaw;  from.pitch = pkt.pitch;
+        from.health = pkt.health;
+        from.state_flags = pkt.state_flags;
         broadcast(PacketType::PlayerPos, &pkt, sizeof(pkt), from_fd);
         break;
     }

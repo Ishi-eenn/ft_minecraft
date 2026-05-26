@@ -19,9 +19,12 @@ bool NetworkClient::sendPacket(PacketType type, const void* payload, uint16_t si
 }
 
 void NetworkClient::updatePosition(float x, float y, float z,
-                                    float yaw, float pitch) {
+                                    float yaw, float pitch,
+                                    float health, uint8_t state_flags) {
     px_ = x;  py_ = y;  pz_ = z;
     pyaw_ = yaw;  ppitch_ = pitch;
+    phealth_ = health;
+    pflags_ = state_flags;
     pos_dirty_ = true;
 }
 
@@ -42,7 +45,7 @@ void NetworkClient::poll(std::vector<NetworkEvent>& out_events) {
     // Position throttle — dt is not available here, so we track wall time via
     // a call-count approximation.  Caller drives the timer externally.
     if (pos_dirty_) {
-        PktPlayerPos pp{player_id_, px_, py_, pz_, pyaw_, ppitch_};
+        PktPlayerPos pp{player_id_, px_, py_, pz_, pyaw_, ppitch_, phealth_, pflags_};
         sendPacket(PacketType::PlayerPos, &pp, sizeof(pp));
         pos_dirty_ = false;
     }
@@ -83,6 +86,10 @@ void NetworkClient::handlePacket(PacketType type, const uint8_t* payload,
         auto& rp   = remote_players_[pkt.player_id];
         rp.x       = pkt.x;  rp.y     = pkt.y;  rp.z   = pkt.z;
         rp.yaw     = pkt.yaw;  rp.pitch = pkt.pitch;
+        rp.health  = pkt.health;
+        if ((pkt.state_flags & 0x02u) && !(rp.state_flags & 0x02u))
+            rp.attack_timer = 0.28f;
+        rp.state_flags = pkt.state_flags;
         break;
     }
     case PacketType::BlockChange: {
