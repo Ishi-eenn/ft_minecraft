@@ -140,30 +140,35 @@ static void biomeWeights(float temp, float humid, float variation,
     addW(ti+1, hi+1, tf          * hf         );
 }
 
+static TerrainGenerator::BiomeType dominantBiome(float wP, float wD, float wT,
+                                                  float wR, float wSw, float wM,
+                                                  float wC, float wSp, float wAu) {
+    TerrainGenerator::BiomeType best = TerrainGenerator::BiomeType::Plains;
+    float best_w = wP;
+    auto choose = [&](TerrainGenerator::BiomeType biome, float w) {
+        if (w > best_w) {
+            best = biome;
+            best_w = w;
+        }
+    };
+    choose(TerrainGenerator::BiomeType::Desert,   wD);
+    choose(TerrainGenerator::BiomeType::Tundra,   wT);
+    choose(TerrainGenerator::BiomeType::Rocky,    wR);
+    choose(TerrainGenerator::BiomeType::Swamp,    wSw);
+    choose(TerrainGenerator::BiomeType::Mountain, wM);
+    choose(TerrainGenerator::BiomeType::Canyon,   wC);
+    choose(TerrainGenerator::BiomeType::Spring,   wSp);
+    choose(TerrainGenerator::BiomeType::Autumn,   wAu);
+    return best;
+}
+
 TerrainGenerator::BiomeType TerrainGenerator::getBiomeAt(float wx, float wz) const {
     float temp      = noise_.getTemperature(wx, wz);
     float humid     = noise_.getHumidity(wx, wz);
     float variation = noise_.getVariation(wx, wz);
     float wP, wD, wT, wR, wSw, wM, wC, wSp, wAu;
     biomeWeights(temp, humid, variation, wP, wD, wT, wR, wSw, wM, wC, wSp, wAu);
-
-    BiomeType best = BiomeType::Plains;
-    float best_w = wP;
-    auto choose = [&](BiomeType biome, float w) {
-        if (w > best_w) {
-            best = biome;
-            best_w = w;
-        }
-    };
-    choose(BiomeType::Desert,   wD);
-    choose(BiomeType::Tundra,   wT);
-    choose(BiomeType::Rocky,    wR);
-    choose(BiomeType::Swamp,    wSw);
-    choose(BiomeType::Mountain, wM);
-    choose(BiomeType::Canyon,   wC);
-    choose(BiomeType::Spring,   wSp);
-    choose(BiomeType::Autumn,   wAu);
-    return best;
+    return dominantBiome(wP, wD, wT, wR, wSw, wM, wC, wSp, wAu);
 }
 
 const char* TerrainGenerator::getBiomeNameAt(float wx, float wz) const {
@@ -1464,13 +1469,15 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             float variation = noise_.getVariation(wx, wz);
             float wP, wD, wT, wR, wSw, wM, wC, wSp, wAu;
             biomeWeights(temp, humid, variation, wP, wD, wT, wR, wSw, wM, wC, wSp, wAu);
-            (void)wP;
 
-            bool is_desert   = wD   > 0.25f;
-            bool is_snowy    = (wT + wM) > 0.25f;   // Tundra・Mountain のみ雪（Autumnは除外）
-            bool is_swamp    = wSw  > 0.25f;
-            bool is_mountain = wM   > 0.25f;
-            bool is_canyon   = wC   > 0.25f;
+            TerrainGenerator::BiomeType biome =
+                dominantBiome(wP, wD, wT, wR, wSw, wM, wC, wSp, wAu);
+            bool is_desert   = biome == TerrainGenerator::BiomeType::Desert;
+            bool is_snowy    = biome == TerrainGenerator::BiomeType::Tundra ||
+                               biome == TerrainGenerator::BiomeType::Mountain;
+            bool is_swamp    = biome == TerrainGenerator::BiomeType::Swamp;
+            bool is_mountain = biome == TerrainGenerator::BiomeType::Mountain;
+            bool is_canyon   = biome == TerrainGenerator::BiomeType::Canyon;
 
             BlockType top;
             if      (is_mountain && surface > 78) top = BlockType::Snow;
@@ -1575,22 +1582,23 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             float variation = noise_.getVariation(wx, wz);
             float wP, wD, wT, wR, wSw, wM, wC, wSp, wAu;
             biomeWeights(temp, humid, variation, wP, wD, wT, wR, wSw, wM, wC, wSp, wAu);
-            (void)wP;
+            TerrainGenerator::BiomeType biome =
+                dominantBiome(wP, wD, wT, wR, wSw, wM, wC, wSp, wAu);
 
             uint32_t chance = hash3(world_x + x, (int)seed_, world_z + z);
 
             // ── 山岳: 植生なし ────────────────────────────────────────────
-            if (wM > 0.30f) continue;
+            if (biome == TerrainGenerator::BiomeType::Mountain) continue;
 
             // ── 砂漠: サボテン ────────────────────────────────────────────
-            if (wD > 0.30f) {
+            if (biome == TerrainGenerator::BiomeType::Desert) {
                 if ((chance % 100u) < 4u && canPlaceCactusAt(chunk, x, z, surface))
                     placeCactus(chunk, x, z, surface, seed_);
                 continue;
             }
 
             // ── 峡谷: サボテンのみ ────────────────────────────────────────
-            if (wC > 0.30f) {
+            if (biome == TerrainGenerator::BiomeType::Canyon) {
                 if ((chance % 100u) < 3u && canPlaceCactusAt(chunk, x, z, surface))
                     placeCactus(chunk, x, z, surface, seed_);
                 continue;
@@ -1608,7 +1616,7 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             }
 
             // ── 春バイオーム: 桜の木と花 ──────────────────────────────────
-            if (wSp > 0.30f) {
+            if (biome == TerrainGenerator::BiomeType::Spring) {
                 if ((chance % 100u) < 10u && canPlaceTreeAt(chunk, x, z, surface))
                     placeSpringTree(chunk, x, z, surface, seed_);
                 else if ((chance >> 8) % 100u < 18u &&
@@ -1621,7 +1629,7 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             }
 
             // ── 秋バイオーム: 紅葉の木 ────────────────────────────────────
-            if (wAu > 0.30f) {
+            if (biome == TerrainGenerator::BiomeType::Autumn) {
                 if ((chance % 100u) < 8u && canPlaceTreeAt(chunk, x, z, surface))
                     placeAutumnTree(chunk, x, z, surface, seed_);
                 else if ((chance >> 8) % 100u < 10u &&
@@ -1631,7 +1639,7 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             }
 
             // ── 沼地: 沼の木（低密度）────────────────────────────────────
-            if (wSw > 0.30f) {
+            if (biome == TerrainGenerator::BiomeType::Swamp) {
                 if ((chance % 100u) < 8u && canPlaceTreeAt(chunk, x, z, surface, /*allow_dirt=*/true))
                     placeSwampTree(chunk, x, z, surface, seed_);
                 else if ((chance >> 8) % 100u < 2u &&
@@ -1644,7 +1652,8 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             }
 
             // ── 寒冷バイオーム(Tundra・Rocky): 松（針葉樹）───────────────
-            if ((wT + wR) > 0.30f) {
+            if (biome == TerrainGenerator::BiomeType::Tundra ||
+                biome == TerrainGenerator::BiomeType::Rocky) {
                 if ((chance % 100u) < 9u && canPlaceTreeAt(chunk, x, z, surface))
                     placePineTree(chunk, x, z, surface, seed_);
                 else if ((chance >> 8) % 100u < 1u &&
@@ -1657,7 +1666,7 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             }
 
             // ── 平原: オーク（広葉樹）────────────────────────────────────
-            if (wP < 0.15f) continue;  // Plains 成分が薄い場所は木が少ない
+            if (biome != TerrainGenerator::BiomeType::Plains) continue;
             if ((chance % 100u) < 7u && canPlaceTreeAt(chunk, x, z, surface))
                 placeTree(chunk, x, z, surface, seed_);
             else if ((chance >> 8) % 100u < 2u &&
