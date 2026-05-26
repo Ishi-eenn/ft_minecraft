@@ -35,6 +35,7 @@ NoiseGen::NoiseGen() {
     cave_horiz_noise_  = new FastNoiseLite();
     temp_noise_        = new FastNoiseLite();
     humid_noise_       = new FastNoiseLite();
+    variation_noise_   = new FastNoiseLite();
 }
 
 NoiseGen::~NoiseGen() {
@@ -44,6 +45,7 @@ NoiseGen::~NoiseGen() {
     delete (FastNoiseLite*)cave_horiz_noise_;
     delete (FastNoiseLite*)temp_noise_;
     delete (FastNoiseLite*)humid_noise_;
+    delete (FastNoiseLite*)variation_noise_;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -96,23 +98,42 @@ void NoiseGen::setSeed(uint32_t seed) {
     chn->SetFrequency(0.020f);
 
     // ── 気温ノイズ ── バイオームの大きな区分けを作る ────────────────────────
-    // 非常に低い周波数（0.0008）= 約1250ブロックで1サイクル → 広大なバイオーム域
-    // オクターブ2で僅かな凹凸を加える
+    // 周波数 0.0020 = 約500ブロックで1サイクル → 各バイオーム帯 ~167 ブロック幅
+    // ※ Perlin ノイズは整数格子点で必ず 0 を返すため、原点付近は常に Warm になる。
+    //   getTemperature() 内でオフセットを加えてスポーン地点を格子点から外す。
     auto* tn = (FastNoiseLite*)temp_noise_;
     tn->SetSeed((int)(seed ^ 0xABCD1234u));
     tn->SetNoiseType(FastNoiseLite::NoiseType_Perlin);
-    tn->SetFrequency(0.0008f);
+    tn->SetFrequency(0.0012f);
     tn->SetFractalType(FastNoiseLite::FractalType_FBm);
     tn->SetFractalOctaves(2);
 
     // ── 湿度ノイズ ── 気温と組み合わせてバイオームを決める ──────────────────
-    // 気温と少し違う周波数（0.0011）にすることでグリッド状の境界線が出にくくなる
+    // 気温と少し違う周波数（0.0014）にすることでグリッド状の境界線が出にくくなる
     auto* hun = (FastNoiseLite*)humid_noise_;
     hun->SetSeed((int)(seed ^ 0x5678EFABu));
     hun->SetNoiseType(FastNoiseLite::NoiseType_Perlin);
-    hun->SetFrequency(0.0011f);
+    hun->SetFrequency(0.0014f);
     hun->SetFractalType(FastNoiseLite::FractalType_FBm);
     hun->SetFractalOctaves(2);
+
+    // ── バリエーションノイズ ── 境界を自然にずらす ─────────────────────────
+    auto* varN = (FastNoiseLite*)variation_noise_;
+    varN->SetSeed((int)(seed ^ 0x1234ABCDu));
+    varN->SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+    varN->SetFrequency(0.0012f);
+    varN->SetFractalType(FastNoiseLite::FractalType_FBm);
+    varN->SetFractalOctaves(2);
+
+    // ── シード依存サンプリングオフセット ────────────────────────────────────
+    // Perlin ノイズは整数格子点（ここでは freq×座標 が整数）で必ず 0 を返す。
+    // ワールド原点はその格子点になりがちなので、シードから各軸にオフセットを加える。
+    // "+0.5f" で格子中心へずらし、seed 由来の項でシードごとに開始バイオームを変える。
+    uint32_t ho = seed ^ 0xFEDCBA98u;
+    temp_ox_  = 100.5f + (float)( ho         % 400u);
+    temp_oz_  = 100.5f + (float)((ho >> 13u) % 400u);
+    humid_ox_ = 200.5f + (float)((ho >>  7u) % 400u);
+    humid_oz_ = 200.5f + (float)((ho >> 20u) % 400u);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -146,10 +167,15 @@ float NoiseGen::getCaveHoriz(float x, float y, float z) const {
 
 // バイオーム気温ノイズ（2D）
 float NoiseGen::getTemperature(float x, float z) const {
-    return ((FastNoiseLite*)temp_noise_)->GetNoise(x, z);
+    return ((FastNoiseLite*)temp_noise_)->GetNoise(x + temp_ox_, z + temp_oz_);
 }
 
 // バイオーム湿度ノイズ（2D）
 float NoiseGen::getHumidity(float x, float z) const {
-    return ((FastNoiseLite*)humid_noise_)->GetNoise(x, z);
+    return ((FastNoiseLite*)humid_noise_)->GetNoise(x + humid_ox_, z + humid_oz_);
+}
+
+// バイオームバリエーションノイズ（2D）: 高値=Mountain, 低値=Canyon
+float NoiseGen::getVariation(float x, float z) const {
+    return ((FastNoiseLite*)variation_noise_)->GetNoise(x, z);
 }

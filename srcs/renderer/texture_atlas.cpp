@@ -292,6 +292,35 @@ static void fillWood(uint8_t* buf, int atlas_w, int tile_col, int tile_row) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// fillColoredLeaves() — 色付き葉テクスチャの共通生成ロジック
+//
+// baseR/G/B: 基本色, varR/G/B: ノイズで変化させる振れ幅
+// ─────────────────────────────────────────────────────────────────────────────
+static void fillColoredLeaves(uint8_t* buf, int atlas_w, int tile_col, int tile_row,
+                               int baseR, int baseG, int baseB,
+                               int varR, int varG, int varB, int seed1, int seed2) {
+    const int tw = ATLAS_TILE_SIZE;
+    const int ox = tile_col * tw;
+    const int oy = tile_row * tw;
+
+    for (int py = 0; py < tw; ++py) {
+        for (int px = 0; px < tw; ++px) {
+            int n1 = hash2(px, py, seed1);
+            int n2 = hash2(px, py, seed2);
+
+            int r = clamp255(baseR + (n1 - 128) * varR / 128);
+            int g = clamp255(baseG + (n1 - 128) * varG / 128);
+            int b = clamp255(baseB + (n1 - 128) * varB / 128);
+
+            if (n2 > 222) { r = clamp255(r + 18); g = clamp255(g + 12); }
+            else if (n2 < 20) { r = clamp255(r - 14); g = clamp255(g - 10); }
+
+            setPixel(buf, atlas_w, ox, oy, px, py, r, g, b);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // fillLeaves() — 葉のテクスチャを生成する
 //
 // 濃い緑に、明るいハイライトと暗い影を混在させて葉の密集感を出す。
@@ -571,6 +600,10 @@ bool TextureAtlas::generate() {
     fillShortGrassPlant(pixels, atlas_w, 5, 1);      // ShortGrass tile=13
     fillFlowerPlant    (pixels, atlas_w, 6, 1);      // Flower     tile=14
     fillMushroomPlant  (pixels, atlas_w, 7, 1);      // Mushroom   tile=15
+    // row=2: 春バイオーム・秋バイオーム用の色付き葉
+    fillColoredLeaves(pixels, atlas_w, 0, 2, 210, 140, 160, 20, 12, 14, 511, 719); // PinkLeaves   tile=16 (桜ピンク)
+    fillColoredLeaves(pixels, atlas_w, 1, 2, 195, 105,  30, 22, 18, 10, 613, 821); // OrangeLeaves tile=17 (紅葉オレンジ)
+    fillColoredLeaves(pixels, atlas_w, 2, 2, 190, 170,  35, 20, 16, 10, 701, 923); // YellowLeaves tile=18 (紅葉黄色)
 
     // GPU にテクスチャを作成して転送する
     glGenTextures(1, &tex_id_);

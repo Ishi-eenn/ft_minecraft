@@ -46,11 +46,15 @@ void TerrainGenerator::setSeed(uint32_t seed) {
 // amp:    ノイズを何倍に増幅するか（大きいほど山が高くなる）
 // valley: 谷の深さを決める係数
 struct BiomeParams { float base, amp, valley; };
-static constexpr BiomeParams kPlains = {56.0f, 38.0f, 22.0f};
-static constexpr BiomeParams kDesert = {48.0f, 10.0f,  3.0f};
-static constexpr BiomeParams kTundra = {54.0f, 30.0f, 18.0f};
-static constexpr BiomeParams kRocky  = {72.0f, 55.0f, 32.0f};
-static constexpr BiomeParams kSwamp  = {41.0f,  6.0f,  1.0f}; // 低平地、水没しやすい
+static constexpr BiomeParams kPlains   = {56.0f,  38.0f, 22.0f};
+static constexpr BiomeParams kDesert   = {48.0f,  10.0f,  3.0f};
+static constexpr BiomeParams kTundra   = {54.0f,  30.0f, 18.0f};
+static constexpr BiomeParams kRocky    = {72.0f,  55.0f, 32.0f};
+static constexpr BiomeParams kSwamp    = {41.0f,   6.0f,  1.0f}; // 低平地、水没しやすい
+static constexpr BiomeParams kMountain = {90.0f,  85.0f, 50.0f}; // 高峰、雪冠、steep
+static constexpr BiomeParams kCanyon   = {85.0f,   5.0f,  0.0f}; // 平坦な台地（canyon cut別途）
+static constexpr BiomeParams kSpring   = {55.0f,  36.0f, 21.0f}; // 春: Plains系、桜の木
+static constexpr BiomeParams kAutumn   = {55.0f,  29.0f, 18.0f}; // 秋: Tundra系、紅葉、雪なし
 
 // ─────────────────────────────────────────────────────────────────────────────
 // hash3() — 3つの整数座標からランダムな値を生成（FNVハッシュ）
@@ -68,33 +72,57 @@ static uint32_t hash3(int x, int y, int z) {
     return h;
 }
 
-// 5つのバイオームの重みを使って単一の float 値をブレンドする
-static float blendBiome(float wP, float wD, float wT, float wR, float wSw,
-                        float vP, float vD, float vT, float vR, float vSw) {
-    return wP*vP + wD*vD + wT*vT + wR*vR + wSw*vSw;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// biomeWeights() — 温度・湿度のノイズ値から5バイオームの重みを計算
+// biomeWeights() — 3×3 グリッドで9バイオームを均等に配置する
 //
-//   Plains (hot+wet), Desert (hot+dry), Tundra (cold+wet), Rocky (cold+dry),
-//   Swamp (very wet) の5バイオーム。
-//   湿度が非常に高い(h01>0.72)とSwampが台頭し、他のバイオームを押しのける。
+//  温度軸 (3段): Cold / Warm / Hot
+//  湿度軸 (3段): Dry  / Med  / Wet
+//
+//         Dry        Med       Wet
+//  Hot  [ Desert ] [ Canyon ] [ Plains ]
+//  Warm [ Rocky  ] [ Spring ] [ Swamp  ]
+//  Cold [ Mountain] [ Autumn ] [ Tundra ]
+//
+//  各バイオームは世界の約1/9を占める。
+//  variation ノイズ(±0.10)を温度軸にわずかに加えて境界を自然にずらす。
+//  バイオーム境界はバイリニア補間で滑らかにブレンドする。
 // ─────────────────────────────────────────────────────────────────────────────
-static void biomeWeights(float temp, float humid,
-                         float& wP, float& wD, float& wT, float& wR, float& wSw) {
-    const float t01 = temp  * 0.5f + 0.5f;   // 0=低温, 1=高温
-    const float h01 = humid * 0.5f + 0.5f;   // 0=乾燥, 1=湿潤
+static void biomeWeights(float temp, float humid, float variation,
+                         float& wP, float& wD, float& wT, float& wR, float& wSw,
+                         float& wM, float& wC, float& wSp, float& wAu) {
+    // Perlin FBm 2オクターブの分布は三角形型（0付近が最多）。
+    // 振幅 1.2 にすると Cold/Warm/Hot がそれぞれ約 33% になる均等分布が得られる。
+    float t01 = std::clamp(temp  * 1.2f + 0.5f + variation * 0.07f, 0.0f, 1.0f);
+    float h01 = std::clamp(humid * 1.2f + 0.5f,                      0.0f, 1.0f);
 
-    // Swamp weight: h01>0.72 から立ち上がり h01=1 で最大1
-    wSw = std::max(0.0f, (h01 - 0.72f) / 0.28f);
+    // 3×3 グリッド: [temp_cell][humid_cell] → バイオームインデックス
+    // 0=Mountain, 1=Autumn, 2=Tundra,
+    // 3=Rocky,    4=Spring, 5=Swamp,
+    // 6=Desert,   7=Canyon, 8=Plains
+    static const int kGrid[3][3] = {
+        {0, 1, 2},  // Cold
+        {3, 4, 5},  // Warm
+        {6, 7, 8},  // Hot
+    };
+    float* ws[9] = {&wM, &wAu, &wT, &wR, &wSp, &wSw, &wD, &wC, &wP};
+    wP = wD = wT = wR = wSw = wM = wC = wSp = wAu = 0.0f;
 
-    // 残り(1-wSw)を4バイオームで分け合う
-    const float base = 1.0f - wSw;
-    wP = t01 * h01        * base;
-    wD = t01 * (1.0f-h01) * base;
-    wT = (1.0f-t01) * h01 * base;
-    wR = (1.0f-t01) * (1.0f-h01) * base;
+    // グリッドセル内の位置（バイリニア補間）
+    // 端セル(ti==2 or hi==2)では tf/hf=0 にして隣セルへのはみ出しを防ぐ
+    float tc = t01 * 3.0f;
+    float hc = h01 * 3.0f;
+    int   ti = std::min((int)tc, 2);
+    int   hi = std::min((int)hc, 2);
+    float tf = (ti < 2) ? (tc - (float)ti) : 0.0f;
+    float hf = (hi < 2) ? (hc - (float)hi) : 0.0f;
+
+    auto addW = [&](int t, int h, float w) {
+        *ws[kGrid[std::min(t, 2)][std::min(h, 2)]] += w;
+    };
+    addW(ti,   hi,   (1.0f - tf) * (1.0f - hf));
+    addW(ti+1, hi,   tf          * (1.0f - hf));
+    addW(ti,   hi+1, (1.0f - tf) * hf         );
+    addW(ti+1, hi+1, tf          * hf         );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -102,16 +130,31 @@ static void biomeWeights(float temp, float humid,
 // ─────────────────────────────────────────────────────────────────────────────
 static int computeTerrainHeight(const NoiseGen& noise, int wx, int wz) {
     float fwx = (float)wx, fwz = (float)wz;
-    float temp  = noise.getTemperature(fwx, fwz);
-    float humid = noise.getHumidity(fwx, fwz);
-    float wP, wD, wT, wR, wSw;
-    biomeWeights(temp, humid, wP, wD, wT, wR, wSw);
-    float base   = blendBiome(wP, wD, wT, wR, wSw, kPlains.base,   kDesert.base,   kTundra.base,   kRocky.base,   kSwamp.base);
-    float amp    = blendBiome(wP, wD, wT, wR, wSw, kPlains.amp,    kDesert.amp,    kTundra.amp,    kRocky.amp,    kSwamp.amp);
-    float valley = blendBiome(wP, wD, wT, wR, wSw, kPlains.valley, kDesert.valley, kTundra.valley, kRocky.valley, kSwamp.valley);
+    float temp      = noise.getTemperature(fwx, fwz);
+    float humid     = noise.getHumidity(fwx, fwz);
+    float variation = noise.getVariation(fwx, fwz);
+    float wP, wD, wT, wR, wSw, wM, wC, wSp, wAu;
+    biomeWeights(temp, humid, variation, wP, wD, wT, wR, wSw, wM, wC, wSp, wAu);
+
+    float base   = wP*kPlains.base   + wD*kDesert.base   + wT*kTundra.base   + wR*kRocky.base
+                 + wSw*kSwamp.base  + wM*kMountain.base + wC*kCanyon.base   + wSp*kSpring.base + wAu*kAutumn.base;
+    float amp    = wP*kPlains.amp    + wD*kDesert.amp    + wT*kTundra.amp    + wR*kRocky.amp
+                 + wSw*kSwamp.amp   + wM*kMountain.amp  + wC*kCanyon.amp    + wSp*kSpring.amp  + wAu*kAutumn.amp;
+    float valley = wP*kPlains.valley + wD*kDesert.valley + wT*kTundra.valley + wR*kRocky.valley
+                 + wSw*kSwamp.valley+ wM*kMountain.valley                   + wSp*kSpring.valley + wAu*kAutumn.valley;
+
     float n   = noise.getHeight(fwx, fwz);
     float v   = noise.getValley(fwx, fwz);
-    float cut = std::max(0.0f, v) * valley;
+    float vClamped = std::max(0.0f, v);
+    float cut = vClamped * valley;
+
+    // Canyon: cubic valley cut でメサ台地と急峻な崖を作る
+    // v^3 により、台地の平坦部分はほぼゼロ cut、崖・谷は急激に深くなる
+    if (wC > 0.01f) {
+        float canyonCut = vClamped * vClamped * vClamped * 42.0f;
+        cut = cut * (1.0f - wC) + canyonCut * wC;
+    }
+
     int s = (int)(base + n * amp - cut);
     return std::clamp(s, 2, CHUNK_SIZE_Y - 2);
 }
@@ -419,6 +462,86 @@ static void placeSwampTree(Chunk& chunk, int x, int z, int surface, uint32_t see
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// placeSpringTree() — 桜の木（春バイオーム用）
+//
+// 短い幹にピンクの葉が丸く広がる。傘型シルエット。
+// ─────────────────────────────────────────────────────────────────────────────
+static void placeSpringTree(Chunk& chunk, int x, int z, int surface, uint32_t seed) {
+    uint32_t h = hash3(chunk.pos.x * CHUNK_SIZE_X + x, surface, chunk.pos.z * CHUNK_SIZE_Z + z);
+    h ^= seed * 0x7C4ACDD5u;
+
+    int trunk_height = 3 + (int)(h % 3u);  // 3〜5 ブロック（やや短め）
+    int trunk_top = surface + trunk_height;
+    if (trunk_top + 3 >= CHUNK_SIZE_Y) return;
+
+    for (int y = surface + 1; y <= trunk_top; ++y)
+        chunk.setBlock(x, y, z, BlockType::Wood);
+
+    // 桜の葉（傘状に広がる丸い冠）
+    static const int radii[] = {1, 3, 2, 1};  // dy=-1,0,+1,+2 の横半径
+    for (int dy = -1; dy <= 2; ++dy) {
+        int cy = trunk_top + dy;
+        if (cy < 0 || cy >= CHUNK_SIZE_Y) continue;
+        int radius = radii[dy + 1];
+        for (int dz = -radius; dz <= radius; ++dz) {
+            for (int dx = -radius; dx <= radius; ++dx) {
+                if (std::abs(dx) == radius && std::abs(dz) == radius) continue;
+                if (dx == 0 && dz == 0 && dy < 0) continue;
+                if (chunk.getBlock(x + dx, cy, z + dz) == BlockType::Air)
+                    chunk.setBlock(x + dx, cy, z + dz, BlockType::PinkLeaves);
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// placeAutumnTree() — 紅葉の木（秋バイオーム用）
+//
+// 通常のオークと同形だが葉をオレンジ・黄色をランダムに混ぜる。
+// ─────────────────────────────────────────────────────────────────────────────
+static void placeAutumnTree(Chunk& chunk, int x, int z, int surface, uint32_t seed) {
+    uint32_t h = hash3(chunk.pos.x * CHUNK_SIZE_X + x, surface, chunk.pos.z * CHUNK_SIZE_Z + z);
+    h ^= seed * 0xD3AD1337u;
+
+    int trunk_height = 4 + (int)(h % 4u);  // 4〜7 ブロック
+    int trunk_top = surface + trunk_height;
+    if (trunk_top + 2 >= CHUNK_SIZE_Y) return;
+
+    for (int y = surface + 1; y <= trunk_top; ++y)
+        chunk.setBlock(x, y, z, BlockType::Wood);
+
+    auto autumnLeaf = [&](int lx, int ly, int lz) -> BlockType {
+        uint32_t lh = hash3(lx, ly, lz) ^ seed;
+        return (lh % 3u == 0) ? BlockType::YellowLeaves : BlockType::OrangeLeaves;
+    };
+
+    // 葉（オーク同形 + オレンジ/黄色ランダム）
+    for (int dy = -2; dy <= 0; ++dy) {
+        int radius = (dy == 0) ? 1 : 2;
+        int cy = trunk_top + dy;
+        for (int dz = -radius; dz <= radius; ++dz) {
+            for (int dx = -radius; dx <= radius; ++dx) {
+                if (std::abs(dx) == radius && std::abs(dz) == radius && dy == 0) continue;
+                if (dx == 0 && dz == 0 && dy <= -1) continue;
+                if (chunk.getBlock(x + dx, cy, z + dz) == BlockType::Air)
+                    chunk.setBlock(x + dx, cy, z + dz, autumnLeaf(x + dx, cy, z + dz));
+            }
+        }
+    }
+    for (int dy = 1; dy <= 2; ++dy) {
+        int cy = trunk_top + dy;
+        if (cy >= CHUNK_SIZE_Y) break;
+        int radius = (dy == 1) ? 1 : 0;
+        for (int dz = -radius; dz <= radius; ++dz) {
+            for (int dx = -radius; dx <= radius; ++dx) {
+                if (chunk.getBlock(x + dx, cy, z + dz) == BlockType::Air)
+                    chunk.setBlock(x + dx, cy, z + dz, autumnLeaf(x + dx, cy, z + dz));
+            }
+        }
+    }
+}
+
 // placeCactus() — サボテン（砂漠バイオーム用）
 //
 // 単純な縦柱。高さ1〜4ブロック。稀に腕（横枝）が出る。
@@ -543,11 +666,13 @@ static bool getVillageCenter(int cell_cx, int cell_cz, uint32_t seed,
 
 // 村に適した場所か（砂漠・岩山・沼除外、平坦・高さチェック）
 static bool isVillageSuitable(const NoiseGen& noise, int vx, int vz) {
-    float temp  = noise.getTemperature((float)vx, (float)vz);
-    float humid = noise.getHumidity((float)vx, (float)vz);
-    float wP, wD, wT, wR, wSw;
-    biomeWeights(temp, humid, wP, wD, wT, wR, wSw);
-    if (wD > 0.35f || wR > 0.35f || wSw > 0.25f) return false;
+    float temp      = noise.getTemperature((float)vx, (float)vz);
+    float humid     = noise.getHumidity((float)vx, (float)vz);
+    float variation = noise.getVariation((float)vx, (float)vz);
+    float wP, wD, wT, wR, wSw, wM, wC, wSp, wAu;
+    biomeWeights(temp, humid, variation, wP, wD, wT, wR, wSw, wM, wC, wSp, wAu);
+    (void)wP; (void)wSp; (void)wAu;
+    if (wD > 0.30f || wC > 0.30f || wM > 0.30f || wSw > 0.30f) return false;
 
     int center_h = computeTerrainHeight(noise, vx, vz);
     if (center_h < SEA_LEVEL + 4 || center_h > 80) return false;
@@ -985,11 +1110,12 @@ static void placeVillage(Chunk& chunk, const NoiseGen& noise, uint32_t seed,
             int base_y = computeTerrainHeight(noise, vx, vz);
 
             // バイオーム素材を決定
-            float temp  = noise.getTemperature((float)vx, (float)vz);
-            float humid = noise.getHumidity((float)vx, (float)vz);
-            float wP, wD, wT, wR, wSw;
-            biomeWeights(temp, humid, wP, wD, wT, wR, wSw);
-            (void)wSw;
+            float temp      = noise.getTemperature((float)vx, (float)vz);
+            float humid     = noise.getHumidity((float)vx, (float)vz);
+            float variation = noise.getVariation((float)vx, (float)vz);
+            float wP, wD, wT, wR, wSw, wM, wC, wSp, wAu;
+            biomeWeights(temp, humid, variation, wP, wD, wT, wR, wSw, wM, wC, wSp, wAu);
+            (void)wP; (void)wD; (void)wR; (void)wSw; (void)wM; (void)wC; (void)wSp; (void)wAu;
             VillageMat mat = getVillageMat(wT);
 
             // レイアウトをハッシュで選択
@@ -1227,28 +1353,32 @@ void TerrainGenerator::generate(Chunk& chunk) const {
 
             float wx = (float)(world_x + x);
             float wz = (float)(world_z + z);
-            float temp  = noise_.getTemperature(wx, wz);
-            float humid = noise_.getHumidity(wx, wz);
-            float wP, wD, wT, wR, wSw;
-            biomeWeights(temp, humid, wP, wD, wT, wR, wSw);
+            float temp      = noise_.getTemperature(wx, wz);
+            float humid     = noise_.getHumidity(wx, wz);
+            float variation = noise_.getVariation(wx, wz);
+            float wP, wD, wT, wR, wSw, wM, wC, wSp, wAu;
+            biomeWeights(temp, humid, variation, wP, wD, wT, wR, wSw, wM, wC, wSp, wAu);
             (void)wP;
 
-            bool is_desert = wD > 0.35f;
-            bool is_snowy  = (wT + wR) > 0.55f;
-            bool is_swamp  = wSw > 0.40f;
+            bool is_desert   = wD   > 0.25f;
+            bool is_snowy    = (wT + wM) > 0.25f;   // Tundra・Mountain のみ雪（Autumnは除外）
+            bool is_swamp    = wSw  > 0.25f;
+            bool is_mountain = wM   > 0.25f;
+            bool is_canyon   = wC   > 0.25f;
 
             BlockType top;
-            if      (surface > 88)             top = BlockType::Snow;
+            if      (is_mountain && surface > 78) top = BlockType::Snow;
+            else if (surface > 88)             top = BlockType::Snow;
             else if (surface <= SEA_LEVEL + 3) top = BlockType::Sand;
-            else if (is_desert)                top = BlockType::Sand;
+            else if (is_desert || is_canyon)   top = BlockType::Sand;
             else if (is_snowy && max_diff < 3) top = BlockType::Snow;
-            else if (is_swamp  && max_diff < 4) top = BlockType::Dirt;  // 沼は泥の地表
+            else if (is_swamp  && max_diff < 4) top = BlockType::Dirt;
             else if (max_diff >= 5)            top = BlockType::Stone;
             else if (max_diff >= 2)            top = BlockType::Dirt;
             else                               top = BlockType::Grass;
 
-            int       sub_depth = is_desert ? 4 : 3;
-            BlockType sub_t     = is_desert ? BlockType::Sand : BlockType::Dirt;
+            int       sub_depth = (is_desert || is_canyon) ? 4 : 3;
+            BlockType sub_t     = (is_desert || is_canyon) ? BlockType::Sand : BlockType::Dirt;
 
             for (int y = 0; y < CHUNK_SIZE_Y; ++y) {
                 BlockType t = BlockType::Air;
@@ -1334,17 +1464,52 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             int surface = heights[x + 1][z + 1];
             float wx = (float)(world_x + x);
             float wz = (float)(world_z + z);
-            float temp  = noise_.getTemperature(wx, wz);
-            float humid = noise_.getHumidity(wx, wz);
-            float wP, wD, wT, wR, wSw;
-            biomeWeights(temp, humid, wP, wD, wT, wR, wSw);
+            float temp      = noise_.getTemperature(wx, wz);
+            float humid     = noise_.getHumidity(wx, wz);
+            float variation = noise_.getVariation(wx, wz);
+            float wP, wD, wT, wR, wSw, wM, wC, wSp, wAu;
+            biomeWeights(temp, humid, variation, wP, wD, wT, wR, wSw, wM, wC, wSp, wAu);
+            (void)wP;
 
             uint32_t chance = hash3(world_x + x, (int)seed_, world_z + z);
 
+            // ── 山岳: 植生なし ────────────────────────────────────────────
+            if (wM > 0.30f) continue;
+
             // ── 砂漠: サボテン ────────────────────────────────────────────
-            if (wD > 0.45f) {
+            if (wD > 0.30f) {
                 if ((chance % 100u) < 4u && canPlaceCactusAt(chunk, x, z, surface))
                     placeCactus(chunk, x, z, surface, seed_);
+                continue;
+            }
+
+            // ── 峡谷: サボテンのみ ────────────────────────────────────────
+            if (wC > 0.30f) {
+                if ((chance % 100u) < 3u && canPlaceCactusAt(chunk, x, z, surface))
+                    placeCactus(chunk, x, z, surface, seed_);
+                continue;
+            }
+
+            // ── 春バイオーム: 桜の木と花 ──────────────────────────────────
+            if (wSp > 0.30f) {
+                if ((chance % 100u) < 10u && canPlaceTreeAt(chunk, x, z, surface))
+                    placeSpringTree(chunk, x, z, surface, seed_);
+                else if ((chance >> 8) % 100u < 18u &&
+                         canPlaceDecorativeAt(chunk, x, z, surface))
+                    placeDecorative(chunk, x, z, surface, BlockType::Flower);
+                else if ((chance >> 16) % 100u < 12u &&
+                         canPlaceDecorativeAt(chunk, x, z, surface))
+                    placeDecorative(chunk, x, z, surface, BlockType::ShortGrass);
+                continue;
+            }
+
+            // ── 秋バイオーム: 紅葉の木 ────────────────────────────────────
+            if (wAu > 0.30f) {
+                if ((chance % 100u) < 8u && canPlaceTreeAt(chunk, x, z, surface))
+                    placeAutumnTree(chunk, x, z, surface, seed_);
+                else if ((chance >> 8) % 100u < 10u &&
+                         canPlaceDecorativeAt(chunk, x, z, surface))
+                    placeDecorative(chunk, x, z, surface, BlockType::ShortGrass);
                 continue;
             }
 
@@ -1358,7 +1523,7 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             if (near_village) continue;
 
             // ── 沼地: 沼の木（低密度）────────────────────────────────────
-            if (wSw > 0.40f) {
+            if (wSw > 0.30f) {
                 if ((chance % 100u) < 8u && canPlaceTreeAt(chunk, x, z, surface, /*allow_dirt=*/true))
                     placeSwampTree(chunk, x, z, surface, seed_);
                 else if ((chance >> 8) % 100u < 2u &&
@@ -1370,8 +1535,8 @@ void TerrainGenerator::generate(Chunk& chunk) const {
                 continue;
             }
 
-            // ── 寒冷バイオーム: 松（針葉樹）──────────────────────────────
-            if ((wT + wR) > 0.45f) {
+            // ── 寒冷バイオーム(Tundra・Rocky): 松（針葉樹）───────────────
+            if ((wT + wR) > 0.30f) {
                 if ((chance % 100u) < 9u && canPlaceTreeAt(chunk, x, z, surface))
                     placePineTree(chunk, x, z, surface, seed_);
                 else if ((chance >> 8) % 100u < 1u &&
@@ -1384,7 +1549,7 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             }
 
             // ── 平原: オーク（広葉樹）────────────────────────────────────
-            if ((wP + wT) < 0.30f) continue;  // 岩山は木が少ない
+            if (wP < 0.15f) continue;  // Plains 成分が薄い場所は木が少ない
             if ((chance % 100u) < 7u && canPlaceTreeAt(chunk, x, z, surface))
                 placeTree(chunk, x, z, surface, seed_);
             else if ((chance >> 8) % 100u < 2u &&
