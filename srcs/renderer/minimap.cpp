@@ -7,23 +7,25 @@
 #include <algorithm>
 
 // ── ブロックタイプ→RGBA カラーテーブル（BlockType のインデックスと対応） ─────
-static constexpr uint8_t kBlockRGB[16][3] = {
-    {  25,  25,  25},  // Air
-    {  88, 148,  64},  // Grass
-    { 134,  96,  67},  // Dirt
-    { 118, 118, 116},  // Stone
-    { 215, 190, 130},  // Sand
-    { 235, 245, 255},  // Snow
-    {  44, 102, 195},  // Water
-    { 100,  73,  47},  // Wood
-    {  50,  95,  35},  // Leaves
-    {  45, 110,  35},  // Cactus
-    {  88, 148,  64},  // Grass side fallback
-    { 214, 174,  48},  // Gold ore
-    {  68, 218, 224},  // Diamond ore
-    {  84, 150,  42},  // Short grass
-    { 220,  70,  70},  // Flower
-    { 156,  68,  48},  // Mushroom
+static constexpr uint8_t kBlockRGB[18][3] = {
+    {  25,  25,  25},  // 0  Air
+    {  88, 148,  64},  // 1  Grass
+    { 134,  96,  67},  // 2  Dirt
+    { 118, 118, 116},  // 3  Stone
+    { 215, 190, 130},  // 4  Sand
+    { 235, 245, 255},  // 5  Snow
+    {  44, 102, 195},  // 6  Water
+    { 100,  73,  47},  // 7  Wood
+    {  50,  95,  35},  // 8  Leaves
+    {  45, 110,  35},  // 9  Cactus
+    {  88, 148,  64},  // 10 (unused, Grass fallback)
+    { 214, 174,  48},  // 11 GoldOre
+    {  68, 218, 224},  // 12 DiamondOre
+    {  84, 150,  42},  // 13 ShortGrass
+    { 220,  70,  70},  // 14 Flower
+    { 156,  68,  48},  // 15 Mushroom
+    { 220, 130, 165},  // 16 PinkLeaves   (桜: ピンク)
+    { 200, 100,  35},  // 17 OrangeLeaves (紅葉オレンジ)
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -120,7 +122,7 @@ void Minimap::update(World& world, float px, float pz, float yaw_deg, float dt) 
                         if (b != BlockType::Air) { bt = b; break; }
                     }
                     int bi = static_cast<int>(bt);
-                    if (bi < 0 || bi >= 16) bi = 0;
+                    if (bi < 0 || bi >= 18) bi = 0;
                     int idx = (row * kSize + col) * 4;
                     pixels_[idx + 0] = kBlockRGB[bi][0];
                     pixels_[idx + 1] = kBlockRGB[bi][1];

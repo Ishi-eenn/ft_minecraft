@@ -511,9 +511,8 @@ static void placeAutumnTree(Chunk& chunk, int x, int z, int surface, uint32_t se
     for (int y = surface + 1; y <= trunk_top; ++y)
         chunk.setBlock(x, y, z, BlockType::Wood);
 
-    auto autumnLeaf = [&](int lx, int ly, int lz) -> BlockType {
-        uint32_t lh = hash3(lx, ly, lz) ^ seed;
-        return (lh % 3u == 0) ? BlockType::YellowLeaves : BlockType::OrangeLeaves;
+    auto autumnLeaf = [&](int, int, int) -> BlockType {
+        return BlockType::OrangeLeaves;
     };
 
     // 葉（オーク同形 + オレンジ/黄色ランダム）

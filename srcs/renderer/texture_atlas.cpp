@@ -603,7 +603,6 @@ bool TextureAtlas::generate() {
     // row=2: 春バイオーム・秋バイオーム用の色付き葉
     fillColoredLeaves(pixels, atlas_w, 0, 2, 210, 140, 160, 20, 12, 14, 511, 719); // PinkLeaves   tile=16 (桜ピンク)
     fillColoredLeaves(pixels, atlas_w, 1, 2, 195, 105,  30, 22, 18, 10, 613, 821); // OrangeLeaves tile=17 (紅葉オレンジ)
-    fillColoredLeaves(pixels, atlas_w, 2, 2, 190, 170,  35, 20, 16, 10, 701, 923); // YellowLeaves tile=18 (紅葉黄色)
 
     // GPU にテクスチャを作成して転送する
     glGenTextures(1, &tex_id_);

@@ -23,7 +23,6 @@ enum class BlockType : uint8_t {
     Mushroom = 15,
     PinkLeaves   = 16,  // 桜（春バイオーム）
     OrangeLeaves = 17,  // 紅葉オレンジ（秋バイオーム）
-    YellowLeaves = 18,  // 紅葉黄色（秋バイオーム）
     COUNT
 };
 
@@ -81,7 +80,7 @@ constexpr int   RENDER_DISTANCE      = 17;    // chunks (= 272 blocks, subject r
 constexpr int   MAX_LOADED_CHUNKS    = 1300;  // (2*17+1)^2 = 1225 chunks max in view
 constexpr float PLAYER_SPEED_NORMAL  = 1.0f;  // blocks/sec (walk)
 constexpr float PLAYER_SPEED_SPRINT  = 2.0f;  // blocks/sec (sprint on ground)
-constexpr float PLAYER_SPEED_FLY     = 200.0f; // blocks/sec (fly = 20x walk, subject V.3)
+constexpr float PLAYER_SPEED_FLY     = 20.0f; // blocks/sec (fly = 20x walk, subject V.3)
 constexpr float FOV_DEGREES          = 80.0f;
 constexpr float NEAR_PLANE           = 0.1f;
 constexpr float FAR_PLANE            = 600.0f;
