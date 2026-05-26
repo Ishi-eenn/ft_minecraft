@@ -43,6 +43,20 @@ void Player::init(GLFWwindow* window) {
     input_.init(window);
 }
 
+void Player::respawnAtInitial() {
+    camera_.setPosition(0.0f, 70.0f, 0.0f);
+    camera_.setYaw(-90.0f);
+    camera_.setPitch(0.0f);
+    velocity_y_ = 0.0f;
+    on_ground_ = false;
+    in_water_ = false;
+}
+
+void Player::pollInputOnly() {
+    input_.newFrame();
+    glfwPollEvents();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // overlapsAny() — 指定位置にプレイヤーAABBを置いたとき固体ブロックと重なるか判定
 //

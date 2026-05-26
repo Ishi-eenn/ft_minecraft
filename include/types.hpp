@@ -21,6 +21,8 @@ enum class BlockType : uint8_t {
     ShortGrass = 13,
     Flower = 14,
     Mushroom = 15,
+    PinkLeaves   = 16,  // 桜（春バイオーム）
+    OrangeLeaves = 17,  // 紅葉オレンジ（秋バイオーム）
     COUNT
 };
 

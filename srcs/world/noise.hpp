@@ -26,6 +26,9 @@ public:
     // 2D low-frequency Perlin — biome humidity [-1, 1]  (-1=dry, +1=wet)
     float getHumidity(float x, float z) const;
 
+    // 2D low-frequency Perlin — biome variation [-1, 1] (splits Rocky→Mountain, Desert→Canyon)
+    float getVariation(float x, float z) const;
+
 private:
     void* height_noise_      = nullptr;
     void* valley_noise_      = nullptr;
@@ -33,4 +36,9 @@ private:
     void* cave_horiz_noise_   = nullptr;
     void* temp_noise_        = nullptr;
     void* humid_noise_       = nullptr;
+    void* variation_noise_   = nullptr;
+
+    // シード依存のサンプリングオフセット（Perlin格子点問題の回避）
+    float temp_ox_ = 0.0f, temp_oz_ = 0.0f;
+    float humid_ox_ = 0.0f, humid_oz_ = 0.0f;
 };

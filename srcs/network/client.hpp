@@ -9,9 +9,12 @@
 struct RemotePlayer {
     float x = 0, y = 0, z = 0;
     float yaw = 0, pitch = 0;
+    float health = 20.0f;
+    uint8_t state_flags = 0;
 
     // Animation state (updated by caller each frame)
     float walk_phase = 0.0f;
+    float attack_timer = 0.0f;
     float prev_x     = 0.0f;
     float prev_z     = 0.0f;
     bool  initialized = false;
@@ -39,7 +42,8 @@ public:
     void poll(std::vector<NetworkEvent>& out_events);
 
     // Queue position update (sent at most every pos_interval_ms).
-    void updatePosition(float x, float y, float z, float yaw, float pitch);
+    void updatePosition(float x, float y, float z, float yaw, float pitch,
+                        float health, uint8_t state_flags);
 
     // Send a block change immediately.
     void sendBlockChange(int x, int y, int z, uint8_t block_type);
@@ -68,6 +72,8 @@ private:
     static constexpr float POS_INTERVAL = 0.05f;
     float   pos_timer_  = 0.0f;
     float   px_ = 0, py_ = 0, pz_ = 0, pyaw_ = 0, ppitch_ = 0;
+    float   phealth_ = 20.0f;
+    uint8_t pflags_ = 0;
     bool    pos_dirty_  = false;
 
     std::map<uint8_t, RemotePlayer> remote_players_;

@@ -198,6 +198,9 @@ struct Engine::Impl {
     MobManager    mob_mgr;
     float         player_health     = 20.0f;
     float         player_max_health = 20.0f;
+    bool          player_dead       = false;
+    float         attack_sync_timer = 0.0f;
+    float         death_sync_timer  = 0.0f;
 
     ~Impl() { delete chunk_mgr; }
 };
@@ -216,6 +219,16 @@ bool Engine::connectToServer(const char* host, uint16_t port) {
     for (int i = 0; i < 50 && !impl_->net_client.isConnected(); ++i) {
         std::vector<NetworkEvent> ev;
         impl_->net_client.poll(ev);
+        for (auto& e : ev) {
+            if (e.kind == NetworkEvent::Kind::BlockChange) {
+                auto bt = static_cast<BlockType>(e.block_type);
+                impl_->world.recordWorldBlockMod(e.bx, e.by, e.bz, bt);
+                if (impl_->chunk_mgr)
+                    rebuildModified(e.bx, e.bz, *impl_->chunk_mgr);
+            } else if (e.kind == NetworkEvent::Kind::TimeSync) {
+                impl_->time_of_day = e.time_of_day;
+            }
+        }
         // short busy-wait; acceptable once at startup
         using namespace std::chrono_literals;
         std::this_thread::sleep_for(10ms);
@@ -401,8 +414,65 @@ void Engine::run() {
         auto isWater = [&](int x, int y, int z) {
             return impl_->world.getWorldBlock(x, y, z) == BlockType::Water;
         };
-        impl_->player.update(dt, isSolid, isWater);
+        if (impl_->player_dead) {
+            InputHandler& inp = impl_->player.input();
+            inp.setCaptureOnClick(false);
+            if (inp.isCursorCaptured())
+                inp.releaseCursor();
+            impl_->player.pollInputOnly();
+        } else {
+            impl_->player.input().setCaptureOnClick(true);
+            impl_->player.update(dt, isSolid, isWater);
+        }
         if (impl_->player.shouldClose()) break;
+
+        auto applyPlayerDamage = [&](float dmg, const char* source) {
+            if (dmg <= 0.0f || impl_->player_dead) return;
+            impl_->player_health -= dmg;
+            fprintf(stderr, "[Game] Player took %.1f damage (%s).\n",
+                    dmg, source);
+            if (impl_->player_health <= 0.0f) {
+                impl_->player_health = 0.0f;
+                impl_->player_dead = true;
+                impl_->death_sync_timer = 1.0f;
+                InputHandler& inp = impl_->player.input();
+                inp.setCaptureOnClick(false);
+                if (inp.isCursorCaptured())
+                    inp.releaseCursor();
+                fprintf(stderr, "[Game] Player died.\n");
+            }
+        };
+
+        if (impl_->player_dead) {
+            InputHandler& inp = impl_->player.input();
+            if (inp.wasFreeLeftClicked()) {
+                const double x = inp.cursorX();
+                const double y = inp.cursorY();
+                const double bx0 = static_cast<double>(width_) * 0.5 - 150.0;
+                const double bx1 = static_cast<double>(width_) * 0.5 + 150.0;
+                const double by0 = static_cast<double>(height_) * 0.55;
+                const double by1 = by0 + 56.0;
+                if (x >= bx0 && x <= bx1 && y >= by0 && y <= by1) {
+                    impl_->player.respawnAtInitial();
+                    impl_->player_health = impl_->player_max_health;
+                    impl_->player_dead = false;
+                    impl_->death_sync_timer = 0.0f;
+                    inp.setCaptureOnClick(true);
+                    inp.captureCursor();
+                    fprintf(stderr, "[Game] Player respawned.\n");
+                }
+            }
+        }
+
+        // 検証用ダメージ: P キーで2ハート分減る。
+        if (!impl_->player_dead) {
+            InputHandler& inp = impl_->player.input();
+            static bool prev_p = false;
+            bool cur_p = inp.isHeld(GLFW_KEY_P);
+            if (cur_p && !prev_p)
+                applyPlayerDamage(4.0f, "debug");
+            prev_p = cur_p;
+        }
 
         // ── ウィンドウリサイズ対応 ────────────────────────────────────────────
         if (impl_->player.wasResized()) {
@@ -473,6 +543,7 @@ void Engine::run() {
 
                 // 左クリック: ブロックを壊してインベントリに追加 OR ゾンビを攻撃
                 if (inp.wasLeftClicked()) {
+                    impl_->attack_sync_timer = 0.28f;
                     if (hit.hit) {
                         BlockType broken = impl_->world.getWorldBlock(
                             hit.bx, hit.by, hit.bz);
@@ -514,23 +585,35 @@ void Engine::run() {
 
         // ── マルチプレイ: ネットワーク送受信 ────────────────────────────────────
         glm::vec3 ppos = impl_->player.camera().position();
+        if (impl_->attack_sync_timer > 0.0f)
+            impl_->attack_sync_timer -= dt;
+        if (impl_->death_sync_timer > 0.0f)
+            impl_->death_sync_timer -= dt;
         const bool is_mob_host = !impl_->multiplayer ||
                                   impl_->net_client.playerId() == 1;
         if (impl_->multiplayer) {
             impl_->net_pos_timer += dt;
             if (impl_->net_pos_timer >= 0.05f) {   // ~20 Hz
                 impl_->net_pos_timer = 0.0f;
+                uint8_t flags = 0;
+                if (impl_->attack_sync_timer > 0.0f) flags |= 0x02u;
+                if (impl_->player_dead || impl_->death_sync_timer > 0.0f)
+                    flags |= 0x04u;
+                float synced_health = (impl_->player_dead || impl_->death_sync_timer > 0.0f)
+                    ? 0.0f : impl_->player_health;
                 impl_->net_client.updatePosition(
                     ppos.x, ppos.y, ppos.z,
                     impl_->player.camera().getYaw(),
-                    impl_->player.camera().getPitch());
+                    impl_->player.camera().getPitch(),
+                    synced_health,
+                    flags);
             }
             std::vector<NetworkEvent> events;
             impl_->net_client.poll(events);
             for (auto& ev : events) {
                 if (ev.kind == NetworkEvent::Kind::BlockChange) {
                     auto bt = static_cast<BlockType>(ev.block_type);
-                    impl_->world.setWorldBlock(ev.bx, ev.by, ev.bz, bt);
+                    impl_->world.recordWorldBlockMod(ev.bx, ev.by, ev.bz, bt);
                     rebuildModified(ev.bx, ev.bz, *impl_->chunk_mgr);
                 } else if (ev.kind == NetworkEvent::Kind::TimeSync) {
                     // サーバーの時刻に合わせる（小さなジャンプは許容）
@@ -552,6 +635,8 @@ void Engine::run() {
                 float speed = std::sqrt(dx * dx + dz * dz) / dt;
                 if (speed > 0.3f)
                     rp.walk_phase += dt * 8.0f;
+                if (rp.attack_timer > 0.0f)
+                    rp.attack_timer -= dt;
                 rp.prev_x = rp.x;
                 rp.prev_z = rp.z;
             }
@@ -593,12 +678,7 @@ void Engine::run() {
                     }
                 }
             }
-            impl_->player_health -= dmg;
-            if (impl_->player_health <= 0) {
-                // シンプルなリスポーン: 体力を全回復
-                impl_->player_health = impl_->player_max_health;
-                fprintf(stderr, "[Game] Player died and respawned.\n");
-            }
+            applyPlayerDamage(dmg, "mob");
         }
 
         // ── チャンクのストリーミング ─────────────────────────────────────────
@@ -615,6 +695,7 @@ void Engine::run() {
         float aspect = (height_ > 0) ? (float)width_ / (float)height_ : 1.0f;
         impl_->player.camera().getViewMatrix(view4x4);
         impl_->player.camera().getProjMatrix(proj4x4, aspect);
+        impl_->renderer.setUnderwater(impl_->player.isInWater());
 
         // 空（スカイボックス）用のView行列は「回転だけ」を残す。
         // 平行移動成分（どこにいるか）を取り除くことで、
@@ -703,7 +784,9 @@ void Engine::run() {
         impl_->renderer.drawHud(fps_display,
                                 (int)std::floor(ppos.x),
                                 (int)std::floor(ppos.y),
-                                (int)std::floor(ppos.z));
+                                (int)std::floor(ppos.z),
+                                impl_->player_health,
+                                impl_->player_max_health);
 
         if (impl_->show_stats_) {
             impl_->renderer.drawStats(
@@ -731,6 +814,9 @@ void Engine::run() {
                                           impl_->player.camera().getYaw(), dt);
             impl_->renderer.drawMinimap();
         }
+
+        if (impl_->player_dead)
+            impl_->renderer.drawDeathScreen();
 
         // 描画したバッファを画面に表示する（ダブルバッファリング）
         impl_->renderer.endFrame();

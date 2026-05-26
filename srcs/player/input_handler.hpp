@@ -19,6 +19,9 @@ public:
     // One-shot click events (true for exactly one frame after press, cursor must be captured)
     bool wasLeftClicked()  const { return left_clicked_;  }
     bool wasRightClicked() const { return right_clicked_; }
+    bool wasFreeLeftClicked() const { return free_left_clicked_; }
+    double cursorX() const { return cursor_x_; }
+    double cursorY() const { return cursor_y_; }
 
     // Scroll wheel Y delta this frame (positive = up, reset each frame)
     float scrollY() const { return scroll_y_; }
@@ -30,6 +33,7 @@ public:
     bool isCursorCaptured() const { return cursor_captured_; }
     void captureCursor();
     void releaseCursor();
+    void setCaptureOnClick(bool enabled) { capture_on_click_ = enabled; }
 
     // Window resize
     int  resizeW()     const { return resize_w_; }
@@ -51,14 +55,17 @@ private:
     GLFWwindow* window_          = nullptr;
     std::array<bool, KEY_COUNT> keys_ = {};
 
+    double cursor_x_ = 0.0, cursor_y_ = 0.0;
     double last_x_ = 0.0, last_y_ = 0.0;
     float  dx_     = 0.0f, dy_    = 0.0f;
     bool   first_  = true;
 
     float scroll_y_        = 0.0f;
     bool cursor_captured_ = false;
+    bool capture_on_click_ = true;
     bool left_clicked_    = false;
     bool right_clicked_   = false;
+    bool free_left_clicked_ = false;
 
     int  resize_w_ = 0, resize_h_ = 0;
     bool resized_  = false;

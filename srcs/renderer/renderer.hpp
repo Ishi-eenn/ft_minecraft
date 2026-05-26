@@ -31,13 +31,14 @@ public:
     void drawSkybox(const float* view3x3, const float* proj4x4) override;
     void drawClouds(const float* view4x4, const float* proj4x4,
                     float cam_x, float cam_z, float elapsed_s);
-    void drawHud(int fps, int px, int py, int pz);
+    void drawHud(int fps, int px, int py, int pz, float health, float max_health);
     void drawStats(int fps, int triangles, int cubes,
                    int visible_chunks, int loaded_chunks,
                    bool minimap_visible);
     void drawPlayerList(uint8_t local_id,
                         const std::map<uint8_t, RemotePlayer>& players,
                         bool multiplayer);
+    void drawDeathScreen();
     void drawHotbar(const Inventory& inv);
     void drawUnderwaterOverlay();
     bool drawTitleScreen(float dt);
@@ -50,6 +51,7 @@ public:
     void endFrame() override;
     void onResize(int w, int h) override;
     void setTimeOfDay(float t);
+    void setUnderwater(bool underwater) { underwater_ = underwater; }
 
     // Shadow mapping
     void updateShadowMatrix(float px, float py, float pz);
@@ -74,6 +76,7 @@ private:
     void appendDigit(float* verts, int& count, int digit, float left, float top, float w, float h) const;
     void appendNumber(float* verts, int& count, int value, float right, float top, float w, float h, float gap) const;
     void appendLetter(float* verts, int& count, char letter, float left, float top, float w, float h) const;
+    void appendHeart(float* verts, int& count, float left, float top, float w, float h) const;
     void appendSignedNumberLeft(float* verts, int& count, int value, float left, float top, float w, float h, float gap) const;
 
     static constexpr int SHADOW_MAP_SIZE = 2048;
@@ -141,4 +144,5 @@ private:
     float sky_horizon_[3]  = {0.55f, 0.72f, 0.90f};
     float sky_ground_[3]   = {0.35f, 0.30f, 0.25f};
     float sun_color_[3]    = {1.00f, 0.98f, 0.85f};
+    bool  underwater_      = false;
 };

@@ -38,6 +38,8 @@ struct PktPlayerPos {
     uint8_t player_id;
     float   x, y, z;
     float   yaw, pitch;
+    float   health;
+    uint8_t state_flags;  // bit0=walking, bit1=attacking, bit2=dead
 };
 
 struct PktBlockChange {
