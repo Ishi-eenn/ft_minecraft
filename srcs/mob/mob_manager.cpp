@@ -258,8 +258,8 @@ void MobManager::trySpawn(float px, float pz,
     if ((int)zombies_.size() >= MAX_ZOMBIES) return;
 
     // time_of_day wraps 0=midnight, 0.5=noon.
-    // Zombies remain night-only, but creepers can spawn during the day too.
     const bool is_night = (time_of_day > 0.75f || time_of_day < 0.25f);
+    if (!is_night) return;
 
     const float angle = ((float)rand() / RAND_MAX) * 6.28318f;
     const float dist  = 12.0f + ((float)rand() / RAND_MAX) * 10.0f;
@@ -275,7 +275,7 @@ void MobManager::trySpawn(float px, float pz,
     z.z          = sz;
     z.yaw        = angle * (180.0f / 3.14159f);
     z.wander_yaw = z.yaw;
-    if (!is_night || ((float)rand() / RAND_MAX) < 0.35f) {
+    if (((float)rand() / RAND_MAX) < 0.35f) {
         z.type   = MobType::Creeper;
         z.health = 20.0f;
     }

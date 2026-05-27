@@ -2181,14 +2181,16 @@ void Renderer::drawMobs(const std::vector<Zombie>& zombies,
                 drawStevePart(vp * m, m, dark);
             }
 
-            // Four short legs
-            const glm::vec3 leg_sz(0.20f, 0.45f, 0.20f);
-            const float xs[] = {-0.18f, 0.18f, -0.18f, 0.18f};
-            const float zs[] = { 0.13f, 0.13f, -0.13f, -0.13f};
+            // Four legs in a 2x2 grid with diagonal (trot) gait:
+            // FL+BR swing together, FR+BL swing together.
+            const glm::vec3 leg_sz(0.24f, 0.48f, 0.24f);
+            // (x, z, swing_sign): FL, FR, BL, BR
+            const float leg_x[4]    = {-0.19f,  0.19f, -0.19f,  0.19f};
+            const float leg_z[4]    = { 0.10f,  0.10f, -0.10f, -0.10f};
+            const float leg_sign[4] = {  1.f,   -1.f,   -1.f,    1.f };
             for (int i = 0; i < 4; ++i) {
-                glm::mat4 m = glm::translate(global, glm::vec3(xs[i], 0.45f, zs[i]));
-                m = glm::rotate(m, (i % 2 == 0) ? leg_swing : -leg_swing,
-                                glm::vec3(1.f, 0.f, 0.f));
+                glm::mat4 m = glm::translate(global, glm::vec3(leg_x[i], 0.48f, leg_z[i]));
+                m = glm::rotate(m, leg_sign[i] * leg_swing, glm::vec3(1.f, 0.f, 0.f));
                 m = glm::translate(m, glm::vec3(0.f, -leg_sz.y * 0.5f, 0.f));
                 m = glm::scale(m, leg_sz);
                 drawStevePart(vp * m, m, body);
