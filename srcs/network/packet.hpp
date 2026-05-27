@@ -53,7 +53,8 @@ struct PktTimeSync {
 
 // MobUpdate payload: uint8_t count, then count × PktMobEntry
 struct PktMobEntry {
-    float   x, y, z, yaw, health;
+    float   x, y, z, yaw, health, fuse_timer;
+    uint8_t type;    // MobType cast to uint8_t
     uint8_t state;   // Zombie::State cast to uint8_t
 };
 

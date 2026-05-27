@@ -170,6 +170,52 @@ static bool inventoryConsume(Inventory& inv) {
     return true;
 }
 
+static void applyMobExplosion(const MobExplosion& ex, World& world,
+                              ChunkManager& chunk_mgr,
+                              NetworkClient* net_client) {
+    const int radius = (int)std::ceil(ex.radius);
+    const float r2 = ex.radius * ex.radius;
+    const int cx = (int)std::floor(ex.x);
+    const int cy = (int)std::floor(ex.y);
+    const int cz = (int)std::floor(ex.z);
+    std::vector<ChunkPos> dirty_chunks;
+    auto addDirtyChunk = [&](ChunkPos pos) {
+        if (std::find(dirty_chunks.begin(), dirty_chunks.end(), pos) ==
+            dirty_chunks.end())
+            dirty_chunks.push_back(pos);
+    };
+
+    for (int x = cx - radius; x <= cx + radius; ++x) {
+        for (int y = cy - radius; y <= cy + radius; ++y) {
+            for (int z = cz - radius; z <= cz + radius; ++z) {
+                const float dx = (x + 0.5f) - ex.x;
+                const float dy = (y + 0.5f) - ex.y;
+                const float dz = (z + 0.5f) - ex.z;
+                if (dx * dx + dy * dy + dz * dz > r2) continue;
+
+                BlockType bt = world.getWorldBlock(x, y, z);
+                if (bt == BlockType::Air || bt == BlockType::Water) continue;
+                if (!world.setWorldBlock(x, y, z, BlockType::Air)) continue;
+
+                int ccx = (int)std::floor((float)x / CHUNK_SIZE_X);
+                int ccz = (int)std::floor((float)z / CHUNK_SIZE_Z);
+                int lx = x - ccx * CHUNK_SIZE_X;
+                int lz = z - ccz * CHUNK_SIZE_Z;
+                addDirtyChunk({ccx, ccz});
+                if (lx == 0)              addDirtyChunk({ccx - 1, ccz});
+                if (lx == CHUNK_SIZE_X-1) addDirtyChunk({ccx + 1, ccz});
+                if (lz == 0)              addDirtyChunk({ccx, ccz - 1});
+                if (lz == CHUNK_SIZE_Z-1) addDirtyChunk({ccx, ccz + 1});
+                if (net_client)
+                    net_client->sendBlockChange(
+                        x, y, z, static_cast<uint8_t>(BlockType::Air));
+            }
+        }
+    }
+    for (ChunkPos pos : dirty_chunks)
+        chunk_mgr.rebuildChunkAt(pos);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Engine の内部実装データ（pImpl パターン）
 // ─────────────────────────────────────────────────────────────────────────────
@@ -677,6 +723,8 @@ void Engine::run() {
                             PktMobEntry e;
                             e.x = zs[i].x; e.y = zs[i].y; e.z = zs[i].z;
                             e.yaw = zs[i].yaw; e.health = zs[i].health;
+                            e.fuse_timer = zs[i].fuse_timer;
+                            e.type = (uint8_t)zs[i].type;
                             e.state = (uint8_t)zs[i].state;
                             buf.insert(buf.end(),
                                        reinterpret_cast<uint8_t*>(&e),
@@ -685,6 +733,14 @@ void Engine::run() {
                         impl_->net_client.sendRaw(PacketType::MobUpdate,
                                                    buf.data(), (uint16_t)buf.size());
                     }
+                }
+            }
+            if (is_mob_host) {
+                auto explosions = impl_->mob_mgr.consumeExplosions();
+                for (const MobExplosion& ex : explosions) {
+                    applyMobExplosion(
+                        ex, impl_->world, *impl_->chunk_mgr,
+                        impl_->multiplayer ? &impl_->net_client : nullptr);
                 }
             }
             applyPlayerDamage(dmg, "mob");

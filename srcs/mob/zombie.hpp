@@ -1,6 +1,11 @@
 #pragma once
 #include <cstdint>
 
+enum class MobType : uint8_t {
+    Zombie  = 0,
+    Creeper = 1,
+};
+
 struct Zombie {
     // Feet position (y = bottom of body)
     float x = 0, y = 0, z = 0;
@@ -10,8 +15,10 @@ struct Zombie {
     float health     = 20.0f;
     float walk_phase = 0.0f;
     float attack_cooldown = 0.0f;
+    float fuse_timer = 0.0f;
+    MobType type = MobType::Zombie;
 
-    enum class State : uint8_t { Idle, Chase, Attack } state = State::Idle;
+    enum class State : uint8_t { Idle, Chase, Attack, Fuse } state = State::Idle;
     float state_timer  = 0.0f;
 
     // Idle wandering

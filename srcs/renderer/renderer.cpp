@@ -2125,6 +2125,77 @@ void Renderer::drawMobs(const std::vector<Zombie>& zombies,
                               glm::radians(z.yaw - 90.0f),
                               glm::vec3(0.f, 1.f, 0.f));
 
+        if (z.type == MobType::Creeper) {
+            const float pulse = (z.fuse_timer > 0.0f)
+                ? (0.5f + 0.5f * sinf(z.fuse_timer * 36.0f))
+                : 0.0f;
+            const float flash = glm::clamp(z.fuse_timer / 1.5f, 0.0f, 1.0f) * pulse;
+            const float kBaseBody[] = {0.22f, 0.66f, 0.18f};
+            const float kBaseDark[] = {0.04f, 0.16f, 0.04f};
+            float body[] = {
+                kBaseBody[0] + (1.0f - kBaseBody[0]) * flash,
+                kBaseBody[1] + (1.0f - kBaseBody[1]) * flash,
+                kBaseBody[2] + (1.0f - kBaseBody[2]) * flash,
+            };
+            float dark[] = {
+                kBaseDark[0] + (1.0f - kBaseDark[0]) * flash,
+                kBaseDark[1] + (1.0f - kBaseDark[1]) * flash,
+                kBaseDark[2] + (1.0f - kBaseDark[2]) * flash,
+            };
+
+            const float leg_swing = glm::radians(sinf(z.walk_phase) * 18.0f);
+
+            // Body
+            {
+                glm::vec3 sz(0.62f, 0.90f, 0.36f);
+                glm::mat4 m = glm::translate(global, glm::vec3(0.f, 0.82f, 0.f));
+                m = glm::scale(m, sz);
+                drawStevePart(vp * m, m, body);
+            }
+
+            // Head
+            {
+                glm::vec3 sz(0.66f, 0.66f, 0.66f);
+                glm::mat4 m = glm::translate(global, glm::vec3(0.f, 1.50f, 0.f));
+                m = glm::scale(m, sz);
+                drawStevePart(vp * m, m, body);
+            }
+
+            // Face: eyes and mouth on the +Z side of the head.
+            {
+                glm::vec3 sz(0.12f, 0.12f, 0.035f);
+                glm::mat4 m = glm::translate(global, glm::vec3(-0.17f, 1.58f, 0.345f));
+                m = glm::scale(m, sz);
+                drawStevePart(vp * m, m, dark);
+            }
+            {
+                glm::vec3 sz(0.12f, 0.12f, 0.035f);
+                glm::mat4 m = glm::translate(global, glm::vec3(0.17f, 1.58f, 0.345f));
+                m = glm::scale(m, sz);
+                drawStevePart(vp * m, m, dark);
+            }
+            {
+                glm::vec3 sz(0.14f, 0.22f, 0.035f);
+                glm::mat4 m = glm::translate(global, glm::vec3(0.f, 1.39f, 0.345f));
+                m = glm::scale(m, sz);
+                drawStevePart(vp * m, m, dark);
+            }
+
+            // Four short legs
+            const glm::vec3 leg_sz(0.20f, 0.45f, 0.20f);
+            const float xs[] = {-0.18f, 0.18f, -0.18f, 0.18f};
+            const float zs[] = { 0.13f, 0.13f, -0.13f, -0.13f};
+            for (int i = 0; i < 4; ++i) {
+                glm::mat4 m = glm::translate(global, glm::vec3(xs[i], 0.45f, zs[i]));
+                m = glm::rotate(m, (i % 2 == 0) ? leg_swing : -leg_swing,
+                                glm::vec3(1.f, 0.f, 0.f));
+                m = glm::translate(m, glm::vec3(0.f, -leg_sz.y * 0.5f, 0.f));
+                m = glm::scale(m, leg_sz);
+                drawStevePart(vp * m, m, body);
+            }
+            continue;
+        }
+
         // Walk swing for legs; arms are mostly raised, with smaller swing
         const float leg_swing = glm::radians(sinf(z.walk_phase) * 28.0f);
         const float arm_raise = glm::radians(-70.0f);   // zombie arms forward
