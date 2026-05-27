@@ -453,6 +453,19 @@ void Renderer::appendLetter(float* verts, int& count, char letter,
             appendLine(verts, count, left, top, left, bot);
             appendLine(verts, count, left, bot, right, bot);
             break;
+        case 'G':
+            appendLine(verts, count, left, top, right, top);
+            appendLine(verts, count, left, top, left, bot);
+            appendLine(verts, count, left, bot, right, bot);
+            appendLine(verts, count, right, bot, right, mid);
+            appendLine(verts, count, right, mid, left + w * 0.55f, mid);
+            break;
+        case 'M':
+            appendLine(verts, count, left, top, left, bot);
+            appendLine(verts, count, right, top, right, bot);
+            appendLine(verts, count, left, top, (left + right) * 0.5f, mid);
+            appendLine(verts, count, (left + right) * 0.5f, mid, right, top);
+            break;
         case 'N':
             appendLine(verts, count, left, top, left, bot);
             appendLine(verts, count, right, top, right, bot);
@@ -685,7 +698,7 @@ void Renderer::drawHud(int fps, int px, int py, int pz,
 // ─────────────────────────────────────────────────────────────────────────────
 void Renderer::drawStats(int fps, int triangles, int cubes,
                          int visible_chunks, int loaded_chunks,
-                         bool minimap_visible) {
+                         bool minimap_visible, const char* biome_name) {
     const float hw = static_cast<float>(width_)  * 0.5f;
     const float hh = static_cast<float>(height_) * 0.5f;
 
@@ -693,7 +706,7 @@ void Renderer::drawStats(int fps, int triangles, int cubes,
     const float top_px = minimap_visible ? 320.0f : 44.0f;
     const float y1 =  1.0f - top_px / hh;
     const float x1 = x0 + 260.0f / hw;
-    const float y0 = y1 - 132.0f / hh;
+    const float y0 = y1 - 156.0f / hh;
 
     auto drawQuad = [&](float qx0, float qy0, float qx1, float qy1,
                         float r, float g, float b, float a) {
@@ -731,12 +744,18 @@ void Renderer::drawStats(int fps, int triangles, int cubes,
         appendNumber(verts.data(), count, value,
                      x1 - 16.0f / hw, y, lw, lh, gap);
     };
+    auto appendTextRow = [&](const char* label, const char* value, int row) {
+        float y = y1 - (24.0f + 24.0f * static_cast<float>(row)) / hh;
+        appendWord(label, x0 + 14.0f / hw, y);
+        appendWord(value ? value : "UNKNOWN", x0 + 88.0f / hw, y);
+    };
 
     appendRow("FPS", fps, 0);
     appendRow("TRI", triangles, 1);
     appendRow("CUB", cubes, 2);
     appendRow("CHK", visible_chunks, 3);
     appendRow("LOAD", loaded_chunks, 4);
+    appendTextRow("BIOME", biome_name, 5);
 
     glBindBuffer(GL_ARRAY_BUFFER, hud_vbo_);
     glBufferSubData(GL_ARRAY_BUFFER, 0, count * sizeof(float), verts.data());
@@ -2106,6 +2125,79 @@ void Renderer::drawMobs(const std::vector<Zombie>& zombies,
                               glm::radians(z.yaw - 90.0f),
                               glm::vec3(0.f, 1.f, 0.f));
 
+        if (z.type == MobType::Creeper) {
+            const float pulse = (z.fuse_timer > 0.0f)
+                ? (0.5f + 0.5f * sinf(z.fuse_timer * 36.0f))
+                : 0.0f;
+            const float flash = glm::clamp(z.fuse_timer / 1.5f, 0.0f, 1.0f) * pulse;
+            const float kBaseBody[] = {0.22f, 0.66f, 0.18f};
+            const float kBaseDark[] = {0.04f, 0.16f, 0.04f};
+            float body[] = {
+                kBaseBody[0] + (1.0f - kBaseBody[0]) * flash,
+                kBaseBody[1] + (1.0f - kBaseBody[1]) * flash,
+                kBaseBody[2] + (1.0f - kBaseBody[2]) * flash,
+            };
+            float dark[] = {
+                kBaseDark[0] + (1.0f - kBaseDark[0]) * flash,
+                kBaseDark[1] + (1.0f - kBaseDark[1]) * flash,
+                kBaseDark[2] + (1.0f - kBaseDark[2]) * flash,
+            };
+
+            const float leg_swing = glm::radians(sinf(z.walk_phase) * 18.0f);
+
+            // Body
+            {
+                glm::vec3 sz(0.62f, 0.90f, 0.36f);
+                glm::mat4 m = glm::translate(global, glm::vec3(0.f, 0.82f, 0.f));
+                m = glm::scale(m, sz);
+                drawStevePart(vp * m, m, body);
+            }
+
+            // Head
+            {
+                glm::vec3 sz(0.66f, 0.66f, 0.66f);
+                glm::mat4 m = glm::translate(global, glm::vec3(0.f, 1.50f, 0.f));
+                m = glm::scale(m, sz);
+                drawStevePart(vp * m, m, body);
+            }
+
+            // Face: eyes and mouth on the +Z side of the head.
+            {
+                glm::vec3 sz(0.12f, 0.12f, 0.035f);
+                glm::mat4 m = glm::translate(global, glm::vec3(-0.17f, 1.58f, 0.345f));
+                m = glm::scale(m, sz);
+                drawStevePart(vp * m, m, dark);
+            }
+            {
+                glm::vec3 sz(0.12f, 0.12f, 0.035f);
+                glm::mat4 m = glm::translate(global, glm::vec3(0.17f, 1.58f, 0.345f));
+                m = glm::scale(m, sz);
+                drawStevePart(vp * m, m, dark);
+            }
+            {
+                glm::vec3 sz(0.14f, 0.22f, 0.035f);
+                glm::mat4 m = glm::translate(global, glm::vec3(0.f, 1.39f, 0.345f));
+                m = glm::scale(m, sz);
+                drawStevePart(vp * m, m, dark);
+            }
+
+            // Four legs in a 2x2 grid with diagonal (trot) gait:
+            // FL+BR swing together, FR+BL swing together.
+            const glm::vec3 leg_sz(0.24f, 0.48f, 0.24f);
+            // (x, z, swing_sign): FL, FR, BL, BR
+            const float leg_x[4]    = {-0.19f,  0.19f, -0.19f,  0.19f};
+            const float leg_z[4]    = { 0.10f,  0.10f, -0.10f, -0.10f};
+            const float leg_sign[4] = {  1.f,   -1.f,   -1.f,    1.f };
+            for (int i = 0; i < 4; ++i) {
+                glm::mat4 m = glm::translate(global, glm::vec3(leg_x[i], 0.48f, leg_z[i]));
+                m = glm::rotate(m, leg_sign[i] * leg_swing, glm::vec3(1.f, 0.f, 0.f));
+                m = glm::translate(m, glm::vec3(0.f, -leg_sz.y * 0.5f, 0.f));
+                m = glm::scale(m, leg_sz);
+                drawStevePart(vp * m, m, body);
+            }
+            continue;
+        }
+
         // Walk swing for legs; arms are mostly raised, with smaller swing
         const float leg_swing = glm::radians(sinf(z.walk_phase) * 28.0f);
         const float arm_raise = glm::radians(-70.0f);   // zombie arms forward
@@ -2171,6 +2263,66 @@ void Renderer::drawMobs(const std::vector<Zombie>& zombies,
         }
     }
 
+    glEnable(GL_CULL_FACE);
+    glBindVertexArray(0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// drawFirstPersonHand() — ローカルプレイヤーの一人称ハンドアニメーション
+//
+// 画面右下に腕を表示する。歩行時にボブ、攻撃時にスイングアニメーション。
+// 全3Dコンテンツの後・HUD の前に呼ぶ。深度テスト無効で必ず最前面に表示。
+//
+// walk_phase       : 移動中に加算される位相値（radians）
+// attack_timer_norm: attack_sync_timer / 0.28f（1.0=攻撃直後, 0.0=待機）
+// ─────────────────────────────────────────────────────────────────────────────
+void Renderer::drawFirstPersonHand(float walk_phase, float attack_timer_norm) {
+    if (!entity_vao_) return;
+
+    static const float kSkin[] = {0.83f, 0.66f, 0.52f};
+
+    const float aspect = static_cast<float>(width_) / static_cast<float>(height_);
+    // 正射影投影: パース歪み（台形）を排除してブロックを綺麗な長方形に見せる
+    // 範囲は FOV 70° で z=-1.5 に相当するビュー空間座標に合わせる
+    const float h = tanf(glm::radians(70.0f) * 0.5f) * 1.5f;  // ≈ 1.050
+    const float w = h * aspect;
+    const glm::mat4 proj = glm::ortho(-w, w, -h, h, 0.05f, 10.0f);
+    const glm::mat4 view = glm::mat4(1.0f);
+
+    // 歩行ボブ: 小さな上下 + 左右の揺れ
+    const float bob_y = sinf(walk_phase)        * 0.06f;
+    const float bob_x = sinf(walk_phase * 0.5f) * 0.03f;
+
+    // 攻撃スイング: Z軸回転で「振り下ろし」
+    // Y=-40° の状態でZ回転すると腕の先が左下に移動 → 振り下ろしに見える
+    const float progress  = 1.0f - std::clamp(attack_timer_norm, 0.0f, 1.0f);
+    const float swing_z   = sinf(progress * glm::pi<float>()) * glm::radians(45.0f);
+
+    // 腕のトランスフォーム: 長方形ブロックを右下コーナーに配置、Y軸で回転して側面を見せる
+    glm::mat4 m = glm::translate(glm::mat4(1.0f),
+        glm::vec3(0.82f + bob_x, -1.30f + bob_y, -1.5f));
+    m = glm::rotate(m, glm::radians(-40.0f),             glm::vec3(0.f, 1.f, 0.f));
+    m = glm::rotate(m, glm::radians(15.0f),              glm::vec3(1.f, 0.f, 0.f));
+    m = glm::rotate(m, glm::radians(10.0f) + swing_z,    glm::vec3(0.f, 0.f, 1.f));
+    m = glm::scale(m, glm::vec3(0.40f, 1.20f, 0.28f));  // Y方向に伸ばして下端を画面外へ
+
+    entity_shader_.use();
+    entity_shader_.setVec3 ("uSunDir",      sun_dir_[0], sun_dir_[1], sun_dir_[2]);
+    entity_shader_.setFloat("uAmbient",     std::max(ambient_, 0.35f));
+    entity_shader_.setFloat("uSunStrength", sun_strength_ * 0.6f);
+    entity_shader_.setMat4 ("uView",        glm::value_ptr(view));
+    entity_shader_.setVec3 ("uFogColor",    sky_horizon_[0], sky_horizon_[1], sky_horizon_[2]);
+    entity_shader_.setFloat("uFogStart",    9999.0f);
+    entity_shader_.setFloat("uFogEnd",      10000.0f);
+
+    glClear(GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glBindVertexArray(entity_vao_);
+
+    drawStevePart(proj * m, m, kSkin);
+
+    glDisable(GL_DEPTH_TEST);
     glEnable(GL_CULL_FACE);
     glBindVertexArray(0);
 }

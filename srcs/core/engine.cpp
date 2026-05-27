@@ -170,6 +170,52 @@ static bool inventoryConsume(Inventory& inv) {
     return true;
 }
 
+static void applyMobExplosion(const MobExplosion& ex, World& world,
+                              ChunkManager& chunk_mgr,
+                              NetworkClient* net_client) {
+    const int radius = (int)std::ceil(ex.radius);
+    const float r2 = ex.radius * ex.radius;
+    const int cx = (int)std::floor(ex.x);
+    const int cy = (int)std::floor(ex.y);
+    const int cz = (int)std::floor(ex.z);
+    std::vector<ChunkPos> dirty_chunks;
+    auto addDirtyChunk = [&](ChunkPos pos) {
+        if (std::find(dirty_chunks.begin(), dirty_chunks.end(), pos) ==
+            dirty_chunks.end())
+            dirty_chunks.push_back(pos);
+    };
+
+    for (int x = cx - radius; x <= cx + radius; ++x) {
+        for (int y = cy - radius; y <= cy + radius; ++y) {
+            for (int z = cz - radius; z <= cz + radius; ++z) {
+                const float dx = (x + 0.5f) - ex.x;
+                const float dy = (y + 0.5f) - ex.y;
+                const float dz = (z + 0.5f) - ex.z;
+                if (dx * dx + dy * dy + dz * dz > r2) continue;
+
+                BlockType bt = world.getWorldBlock(x, y, z);
+                if (bt == BlockType::Air || bt == BlockType::Water) continue;
+                if (!world.setWorldBlock(x, y, z, BlockType::Air)) continue;
+
+                int ccx = (int)std::floor((float)x / CHUNK_SIZE_X);
+                int ccz = (int)std::floor((float)z / CHUNK_SIZE_Z);
+                int lx = x - ccx * CHUNK_SIZE_X;
+                int lz = z - ccz * CHUNK_SIZE_Z;
+                addDirtyChunk({ccx, ccz});
+                if (lx == 0)              addDirtyChunk({ccx - 1, ccz});
+                if (lx == CHUNK_SIZE_X-1) addDirtyChunk({ccx + 1, ccz});
+                if (lz == 0)              addDirtyChunk({ccx, ccz - 1});
+                if (lz == CHUNK_SIZE_Z-1) addDirtyChunk({ccx, ccz + 1});
+                if (net_client)
+                    net_client->sendBlockChange(
+                        x, y, z, static_cast<uint8_t>(BlockType::Air));
+            }
+        }
+    }
+    for (ChunkPos pos : dirty_chunks)
+        chunk_mgr.rebuildChunkAt(pos);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Engine の内部実装データ（pImpl パターン）
 // ─────────────────────────────────────────────────────────────────────────────
@@ -201,6 +247,7 @@ struct Engine::Impl {
     bool          player_dead       = false;
     float         attack_sync_timer = 0.0f;
     float         death_sync_timer  = 0.0f;
+    float         local_walk_phase  = 0.0f;
 
     ~Impl() { delete chunk_mgr; }
 };
@@ -423,6 +470,14 @@ void Engine::run() {
         } else {
             impl_->player.input().setCaptureOnClick(true);
             impl_->player.update(dt, isSolid, isWater);
+
+            // 歩行ボブ位相: WASD 入力中のみ加算
+            if (!impl_->player_dead) {
+                InputHandler& inp = impl_->player.input();
+                bool moving = inp.isHeld(GLFW_KEY_W) || inp.isHeld(GLFW_KEY_S)
+                           || inp.isHeld(GLFW_KEY_A) || inp.isHeld(GLFW_KEY_D);
+                if (moving) impl_->local_walk_phase += dt * 8.0f;
+            }
         }
         if (impl_->player.shouldClose()) break;
 
@@ -668,6 +723,8 @@ void Engine::run() {
                             PktMobEntry e;
                             e.x = zs[i].x; e.y = zs[i].y; e.z = zs[i].z;
                             e.yaw = zs[i].yaw; e.health = zs[i].health;
+                            e.fuse_timer = zs[i].fuse_timer;
+                            e.type = (uint8_t)zs[i].type;
                             e.state = (uint8_t)zs[i].state;
                             buf.insert(buf.end(),
                                        reinterpret_cast<uint8_t*>(&e),
@@ -676,6 +733,14 @@ void Engine::run() {
                         impl_->net_client.sendRaw(PacketType::MobUpdate,
                                                    buf.data(), (uint16_t)buf.size());
                     }
+                }
+            }
+            if (is_mob_host) {
+                auto explosions = impl_->mob_mgr.consumeExplosions();
+                for (const MobExplosion& ex : explosions) {
+                    applyMobExplosion(
+                        ex, impl_->world, *impl_->chunk_mgr,
+                        impl_->multiplayer ? &impl_->net_client : nullptr);
                 }
             }
             applyPlayerDamage(dmg, "mob");
@@ -780,6 +845,12 @@ void Engine::run() {
         if (impl_->player.isInWater())
             impl_->renderer.drawUnderwaterOverlay();
 
+        // 一人称ハンドアニメーション（死亡時は非表示）
+        if (!impl_->player_dead)
+            impl_->renderer.drawFirstPersonHand(
+                impl_->local_walk_phase,
+                impl_->attack_sync_timer / 0.28f);
+
         // HUD（クロスヘア＋FPS＋座標表示）を最前面に描画
         impl_->renderer.drawHud(fps_display,
                                 (int)std::floor(ppos.x),
@@ -789,13 +860,15 @@ void Engine::run() {
                                 impl_->player_max_health);
 
         if (impl_->show_stats_) {
+            const char* biome_name = impl_->world.getBiomeNameAt(ppos.x, ppos.z);
             impl_->renderer.drawStats(
                 fps_display,
                 visible_triangles,
                 visible_cubes,
                 static_cast<int>(visible.size()),
                 static_cast<int>(impl_->chunk_mgr->loadedCount()),
-                impl_->show_minimap_);
+                impl_->show_minimap_,
+                biome_name);
         }
 
         if (impl_->show_player_list_) {

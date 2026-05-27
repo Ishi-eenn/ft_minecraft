@@ -41,6 +41,21 @@ void TerrainGenerator::setSeed(uint32_t seed) {
     noise_.setSeed(seed);
 }
 
+const char* TerrainGenerator::biomeName(BiomeType biome) {
+    switch (biome) {
+        case BiomeType::Plains:   return "PLAINS";
+        case BiomeType::Desert:   return "DESERT";
+        case BiomeType::Tundra:   return "TUNDRA";
+        case BiomeType::Rocky:    return "ROCKY";
+        case BiomeType::Swamp:    return "SWAMP";
+        case BiomeType::Mountain: return "MOUNTAIN";
+        case BiomeType::Canyon:   return "CANYON";
+        case BiomeType::Spring:   return "SPRING";
+        case BiomeType::Autumn:   return "AUTUMN";
+    }
+    return "UNKNOWN";
+}
+
 // ─── バイオームパラメーター ───────────────────────────────────────────────────
 // base:   地形の基準高さ（ブロック数）
 // amp:    ノイズを何倍に増幅するか（大きいほど山が高くなる）
@@ -123,6 +138,41 @@ static void biomeWeights(float temp, float humid, float variation,
     addW(ti+1, hi,   tf          * (1.0f - hf));
     addW(ti,   hi+1, (1.0f - tf) * hf         );
     addW(ti+1, hi+1, tf          * hf         );
+}
+
+static TerrainGenerator::BiomeType dominantBiome(float wP, float wD, float wT,
+                                                  float wR, float wSw, float wM,
+                                                  float wC, float wSp, float wAu) {
+    TerrainGenerator::BiomeType best = TerrainGenerator::BiomeType::Plains;
+    float best_w = wP;
+    auto choose = [&](TerrainGenerator::BiomeType biome, float w) {
+        if (w > best_w) {
+            best = biome;
+            best_w = w;
+        }
+    };
+    choose(TerrainGenerator::BiomeType::Desert,   wD);
+    choose(TerrainGenerator::BiomeType::Tundra,   wT);
+    choose(TerrainGenerator::BiomeType::Rocky,    wR);
+    choose(TerrainGenerator::BiomeType::Swamp,    wSw);
+    choose(TerrainGenerator::BiomeType::Mountain, wM);
+    choose(TerrainGenerator::BiomeType::Canyon,   wC);
+    choose(TerrainGenerator::BiomeType::Spring,   wSp);
+    choose(TerrainGenerator::BiomeType::Autumn,   wAu);
+    return best;
+}
+
+TerrainGenerator::BiomeType TerrainGenerator::getBiomeAt(float wx, float wz) const {
+    float temp      = noise_.getTemperature(wx, wz);
+    float humid     = noise_.getHumidity(wx, wz);
+    float variation = noise_.getVariation(wx, wz);
+    float wP, wD, wT, wR, wSw, wM, wC, wSp, wAu;
+    biomeWeights(temp, humid, variation, wP, wD, wT, wR, wSw, wM, wC, wSp, wAu);
+    return dominantBiome(wP, wD, wT, wR, wSw, wM, wC, wSp, wAu);
+}
+
+const char* TerrainGenerator::getBiomeNameAt(float wx, float wz) const {
+    return biomeName(getBiomeAt(wx, wz));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -337,40 +387,62 @@ static void placeDecorative(Chunk& chunk, int x, int z, int surface, BlockType t
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// placeTree() — 木を1本生成する
+// placeLeaf() — 葉1ブロックを密度判定付きで置く共通ヘルパー
+//   skip_mod: 5〜12 の整数。per-leaf hash が 0 になる確率でスキップする。
+//             skip_mod が大きいほど密（スキップ率 1/skip_mod）。
+// ─────────────────────────────────────────────────────────────────────────────
+static inline void placeLeaf(Chunk& chunk, int wx, int x, int cy, int wz, int z,
+                              int dx, int dz, uint32_t skip_mod, BlockType leaf) {
+    if ((hash3(wx + dx, cy, wz + dz) % skip_mod) == 0) return;
+    if (chunk.getBlock(x + dx, cy, z + dz) == BlockType::Air)
+        chunk.setBlock(x + dx, cy, z + dz, leaf);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// placeTree() — 広葉樹（オーク）
+//
+// 変化するパラメータ:
+//   trunk_height : 4〜7
+//   crown_radius : 2〜3  （王冠部分の横半径）
+//   crown_layers : 2〜3  （幹頂点より下に葉を張る層数）
+//   skip_mod     : 5〜8  （葉の密度。大きいほど密、小さいほど疎）
 // ─────────────────────────────────────────────────────────────────────────────
 static void placeTree(Chunk& chunk, int x, int z, int surface, uint32_t seed) {
-    uint32_t h = hash3(chunk.pos.x * CHUNK_SIZE_X + x, surface, chunk.pos.z * CHUNK_SIZE_Z + z);
-    h ^= seed * 0x9e3779b9u;
+    int wx = chunk.pos.x * CHUNK_SIZE_X + x;
+    int wz = chunk.pos.z * CHUNK_SIZE_Z + z;
+    uint32_t h = hash3(wx, surface, wz) ^ (seed * 0x9e3779b9u);
 
-    int trunk_height = 4 + (int)(h % 3u);
+    int trunk_height  = 4 + (int)(h         % 4u);  // 4〜7
+    int crown_radius  = 2 + (int)((h >>  4) % 2u);  // 2〜3
+    int crown_layers  = 2 + (int)((h >>  6) % 2u);  // 2〜3
+    uint32_t skip_mod = 5 + (h >>  8) % 4u;         // 5〜8
+
     int trunk_top = surface + trunk_height;
     if (trunk_top + 2 >= CHUNK_SIZE_Y) return;
 
     for (int y = surface + 1; y <= trunk_top; ++y)
         chunk.setBlock(x, y, z, BlockType::Wood);
 
-    for (int dy = -2; dy <= 0; ++dy) {
-        int radius = (dy == 0) ? 1 : 2;
+    // 王冠部（幹頂点から crown_layers 層下まで crown_radius、頂点だけ半径1）
+    for (int dy = -crown_layers; dy <= 0; ++dy) {
+        int radius = (dy == 0) ? 1 : crown_radius;
         int cy = trunk_top + dy;
         for (int dz = -radius; dz <= radius; ++dz) {
             for (int dx = -radius; dx <= radius; ++dx) {
-                if (std::abs(dx) == radius && std::abs(dz) == radius && dy == 0) continue;
-                if (dx == 0 && dz == 0 && dy <= -1) continue;
-                if (chunk.getBlock(x + dx, cy, z + dz) == BlockType::Air)
-                    chunk.setBlock(x + dx, cy, z + dz, BlockType::Leaves);
+                if (std::abs(dx) == radius && std::abs(dz) == radius) continue;
+                if (dx == 0 && dz == 0 && dy < 0) continue;
+                placeLeaf(chunk, wx, x, cy, wz, z, dx, dz, skip_mod, BlockType::Leaves);
             }
         }
     }
-
+    // 上部キャップ（半径1 → 頂点1）
     for (int dy = 1; dy <= 2; ++dy) {
         int cy = trunk_top + dy;
+        if (cy >= CHUNK_SIZE_Y) break;
         int radius = (dy == 1) ? 1 : 0;
         for (int dz = -radius; dz <= radius; ++dz) {
-            for (int dx = -radius; dx <= radius; ++dx) {
-                if (chunk.getBlock(x + dx, cy, z + dz) == BlockType::Air)
-                    chunk.setBlock(x + dx, cy, z + dz, BlockType::Leaves);
-            }
+            for (int dx = -radius; dx <= radius; ++dx)
+                placeLeaf(chunk, wx, x, cy, wz, z, dx, dz, skip_mod, BlockType::Leaves);
         }
     }
 }
@@ -378,32 +450,39 @@ static void placeTree(Chunk& chunk, int x, int z, int surface, uint32_t seed) {
 // ─────────────────────────────────────────────────────────────────────────────
 // placePineTree() — 針葉樹（寒冷地・岩山バイオーム用）
 //
-// 高くて細い円錐形。幹は太め、葉は階段状に細くなる。
+// 変化するパラメータ:
+//   trunk_height : 6〜11
+//   max_radius   : 2〜4  （最下段の葉の横半径）
+//   leaf_tiers   : 5〜7  （葉を張る層数）
+//   skip_mod     : 7〜11 （葉の密度）
 // ─────────────────────────────────────────────────────────────────────────────
 static void placePineTree(Chunk& chunk, int x, int z, int surface, uint32_t seed) {
-    uint32_t h = hash3(chunk.pos.x * CHUNK_SIZE_X + x, surface, chunk.pos.z * CHUNK_SIZE_Z + z);
-    h ^= seed * 0xB5297A4Du;
+    int wx = chunk.pos.x * CHUNK_SIZE_X + x;
+    int wz = chunk.pos.z * CHUNK_SIZE_Z + z;
+    uint32_t h = hash3(wx, surface, wz) ^ (seed * 0xB5297A4Du);
 
-    int trunk_height = 6 + (int)(h % 5u);  // 6〜10 ブロック
+    int trunk_height  = 6  + (int)(h         % 6u);  // 6〜11
+    int max_radius    = 2  + (int)((h >>  4) % 3u);  // 2〜4
+    int leaf_tiers    = 5  + (int)((h >>  7) % 3u);  // 5〜7
+    uint32_t skip_mod = 7u + (h >> 10) % 5u;         // 7〜11（針葉樹は比較的密）
+
     int trunk_top = surface + trunk_height;
     if (trunk_top + 2 >= CHUNK_SIZE_Y) return;
 
-    // 幹
     for (int y = surface + 1; y <= trunk_top; ++y)
         chunk.setBlock(x, y, z, BlockType::Wood);
 
-    // 葉（階段状に: 下から半径 3,2,2,1,1,0 と細くなる）
-    static const int leaf_radius[] = {3, 2, 2, 1, 1, 1, 0};
-    int leaf_start = trunk_top - 5;
-    for (int dy = 0; dy <= 6; ++dy) {
+    // 階段状に細くなる葉（最下段 max_radius、上へ1ずつ減少）
+    int leaf_start = trunk_top - (leaf_tiers - 1);
+    for (int dy = 0; dy < leaf_tiers; ++dy) {
         int cy = leaf_start + dy;
         if (cy < 0 || cy >= CHUNK_SIZE_Y) continue;
-        int radius = (dy < 7) ? leaf_radius[dy] : 0;
+        // 下から上へ線形に半径を減らす（最下段 max_radius → 最上段 0 or 1）
+        int radius = max_radius - (dy * max_radius) / std::max(leaf_tiers - 1, 1);
         for (int dz = -radius; dz <= radius; ++dz) {
             for (int dx = -radius; dx <= radius; ++dx) {
-                if (std::abs(dx) == radius && std::abs(dz) == radius) continue; // 角を丸める
-                if (chunk.getBlock(x + dx, cy, z + dz) == BlockType::Air)
-                    chunk.setBlock(x + dx, cy, z + dz, BlockType::Leaves);
+                if (std::abs(dx) == radius && std::abs(dz) == radius) continue;
+                placeLeaf(chunk, wx, x, cy, wz, z, dx, dz, skip_mod, BlockType::Leaves);
             }
         }
     }
@@ -415,43 +494,48 @@ static void placePineTree(Chunk& chunk, int x, int z, int surface, uint32_t seed
 // ─────────────────────────────────────────────────────────────────────────────
 // placeSwampTree() — 沼地の木（沼バイオーム用）
 //
-// 低く太い幹、広く垂れ下がった葉が特徴。暗い雰囲気を演出する。
+// 変化するパラメータ:
+//   trunk_height : 3〜6
+//   spread       : 2〜4  （葉の最大横半径）
+//   skip_mod     : 3〜6  （沼は葉が疎らに垂れる）
 // ─────────────────────────────────────────────────────────────────────────────
 static void placeSwampTree(Chunk& chunk, int x, int z, int surface, uint32_t seed) {
-    uint32_t h = hash3(chunk.pos.x * CHUNK_SIZE_X + x, surface + 1, chunk.pos.z * CHUNK_SIZE_Z + z);
-    h ^= seed * 0xF1234567u;
+    int wx = chunk.pos.x * CHUNK_SIZE_X + x;
+    int wz = chunk.pos.z * CHUNK_SIZE_Z + z;
+    uint32_t h = hash3(wx, surface + 1, wz) ^ (seed * 0xF1234567u);
 
-    int trunk_height = 3 + (int)(h % 3u);  // 3〜5 ブロック（低め）
+    int trunk_height  = 3 + (int)(h         % 4u);  // 3〜6
+    int spread        = 2 + (int)((h >>  4) % 3u);  // 2〜4
+    uint32_t skip_mod = 3u + (h >>  7) % 4u;        // 3〜6（疎らな垂れ葉）
+
     int trunk_top = surface + trunk_height;
     if (trunk_top + 3 >= CHUNK_SIZE_Y) return;
 
-    // 幹
     for (int y = surface + 1; y <= trunk_top; ++y)
         chunk.setBlock(x, y, z, BlockType::Wood);
 
-    // 葉（広く平たく広がる、縁は垂れ下がり）
+    // 葉の層（-1〜+2）: 下から spread-1, spread, spread-1, spread-2
     for (int dy = -1; dy <= 2; ++dy) {
         int cy = trunk_top + dy;
         if (cy < 0 || cy >= CHUNK_SIZE_Y) continue;
         int radius;
-        if      (dy == -1) radius = 1;
-        else if (dy ==  0) radius = 3;
-        else if (dy ==  1) radius = 2;
-        else               radius = 1;
+        if      (dy == -1) radius = spread - 1;
+        else if (dy ==  0) radius = spread;
+        else if (dy ==  1) radius = spread - 1;
+        else               radius = std::max(1, spread - 2);
         for (int dz = -radius; dz <= radius; ++dz) {
             for (int dx = -radius; dx <= radius; ++dx) {
                 if (dx == 0 && dz == 0 && dy < 0) continue;
                 if (std::abs(dx) == radius && std::abs(dz) == radius) continue;
-                if (chunk.getBlock(x + dx, cy, z + dz) == BlockType::Air)
-                    chunk.setBlock(x + dx, cy, z + dz, BlockType::Leaves);
+                placeLeaf(chunk, wx, x, cy, wz, z, dx, dz, skip_mod, BlockType::Leaves);
             }
         }
     }
-    // 垂れ下がった葉（ランダムに周囲の下段に追加）
-    for (int dz = -2; dz <= 2; ++dz) {
-        for (int dx = -2; dx <= 2; ++dx) {
+    // 垂れ下がった葉（spread 範囲でランダムに追加）
+    for (int dz = -spread; dz <= spread; ++dz) {
+        for (int dx = -spread; dx <= spread; ++dx) {
             if (dx == 0 && dz == 0) continue;
-            uint32_t rnd = hash3(x + dx, trunk_top, z + dz) ^ seed;
+            uint32_t rnd = hash3(wx + dx, trunk_top, wz + dz) ^ seed;
             if ((rnd % 3u) == 0) {
                 int cy = trunk_top - 1;
                 if (cy >= 0 && chunk.getBlock(x + dx, cy, z + dz) == BlockType::Air)
@@ -462,34 +546,42 @@ static void placeSwampTree(Chunk& chunk, int x, int z, int surface, uint32_t see
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
 // placeSpringTree() — 桜の木（春バイオーム用）
 //
-// 短い幹にピンクの葉が丸く広がる。傘型シルエット。
+// 変化するパラメータ:
+//   trunk_height  : 3〜6
+//   crown_radius  : 2〜4  （傘の最大半径）
+//   skip_mod      : 4〜8  （葉の密度）
 // ─────────────────────────────────────────────────────────────────────────────
 static void placeSpringTree(Chunk& chunk, int x, int z, int surface, uint32_t seed) {
-    uint32_t h = hash3(chunk.pos.x * CHUNK_SIZE_X + x, surface, chunk.pos.z * CHUNK_SIZE_Z + z);
-    h ^= seed * 0x7C4ACDD5u;
+    int wx = chunk.pos.x * CHUNK_SIZE_X + x;
+    int wz = chunk.pos.z * CHUNK_SIZE_Z + z;
+    uint32_t h = hash3(wx, surface, wz) ^ (seed * 0x7C4ACDD5u);
 
-    int trunk_height = 3 + (int)(h % 3u);  // 3〜5 ブロック（やや短め）
+    int trunk_height  = 3 + (int)(h         % 4u);  // 3〜6
+    int crown_radius  = 2 + (int)((h >>  4) % 3u);  // 2〜4
+    uint32_t skip_mod = 4u + (h >>  7) % 5u;        // 4〜8
+
     int trunk_top = surface + trunk_height;
     if (trunk_top + 3 >= CHUNK_SIZE_Y) return;
 
     for (int y = surface + 1; y <= trunk_top; ++y)
         chunk.setBlock(x, y, z, BlockType::Wood);
 
-    // 桜の葉（傘状に広がる丸い冠）
-    static const int radii[] = {1, 3, 2, 1};  // dy=-1,0,+1,+2 の横半径
+    // 傘状に広がる桜の冠（dy=-1〜+2）: 下寄りで最大半径、上へ向けて収束
     for (int dy = -1; dy <= 2; ++dy) {
         int cy = trunk_top + dy;
         if (cy < 0 || cy >= CHUNK_SIZE_Y) continue;
-        int radius = radii[dy + 1];
+        int radius;
+        if      (dy == -1) radius = crown_radius - 1;
+        else if (dy ==  0) radius = crown_radius;
+        else if (dy ==  1) radius = crown_radius - 1;
+        else               radius = std::max(1, crown_radius - 2);
         for (int dz = -radius; dz <= radius; ++dz) {
             for (int dx = -radius; dx <= radius; ++dx) {
                 if (std::abs(dx) == radius && std::abs(dz) == radius) continue;
                 if (dx == 0 && dz == 0 && dy < 0) continue;
-                if (chunk.getBlock(x + dx, cy, z + dz) == BlockType::Air)
-                    chunk.setBlock(x + dx, cy, z + dz, BlockType::PinkLeaves);
+                placeLeaf(chunk, wx, x, cy, wz, z, dx, dz, skip_mod, BlockType::PinkLeaves);
             }
         }
     }
@@ -498,33 +590,47 @@ static void placeSpringTree(Chunk& chunk, int x, int z, int surface, uint32_t se
 // ─────────────────────────────────────────────────────────────────────────────
 // placeAutumnTree() — 紅葉の木（秋バイオーム用）
 //
-// 通常のオークと同形だが葉をオレンジ・黄色をランダムに混ぜる。
+// 変化するパラメータ:
+//   trunk_height : 4〜8
+//   crown_radius : 2〜3
+//   crown_layers : 2〜3
+//   skip_mod     : 5〜8  （葉の密度）
+//   葉色         : OrangeLeaves / Leaves をハッシュでランダムに混在
 // ─────────────────────────────────────────────────────────────────────────────
 static void placeAutumnTree(Chunk& chunk, int x, int z, int surface, uint32_t seed) {
-    uint32_t h = hash3(chunk.pos.x * CHUNK_SIZE_X + x, surface, chunk.pos.z * CHUNK_SIZE_Z + z);
-    h ^= seed * 0xD3AD1337u;
+    int wx = chunk.pos.x * CHUNK_SIZE_X + x;
+    int wz = chunk.pos.z * CHUNK_SIZE_Z + z;
+    uint32_t h = hash3(wx, surface, wz) ^ (seed * 0xD3AD1337u);
 
-    int trunk_height = 4 + (int)(h % 4u);  // 4〜7 ブロック
+    int trunk_height  = 4 + (int)(h         % 5u);  // 4〜8
+    int crown_radius  = 2 + (int)((h >>  4) % 2u);  // 2〜3
+    int crown_layers  = 2 + (int)((h >>  6) % 2u);  // 2〜3
+    uint32_t skip_mod = 5u + (h >>  8) % 4u;        // 5〜8
+
     int trunk_top = surface + trunk_height;
     if (trunk_top + 2 >= CHUNK_SIZE_Y) return;
 
     for (int y = surface + 1; y <= trunk_top; ++y)
         chunk.setBlock(x, y, z, BlockType::Wood);
 
-    auto autumnLeaf = [&](int, int, int) -> BlockType {
+    auto autumnLeaf = [](int, int, int) -> BlockType {
         return BlockType::OrangeLeaves;
     };
 
-    // 葉（オーク同形 + オレンジ/黄色ランダム）
-    for (int dy = -2; dy <= 0; ++dy) {
-        int radius = (dy == 0) ? 1 : 2;
+    auto placeAutumnLeaf = [&](int ldx, int lcy, int ldz) {
+        if ((hash3(wx + ldx, lcy, wz + ldz) % skip_mod) == 0) return;
+        if (chunk.getBlock(x + ldx, lcy, z + ldz) == BlockType::Air)
+            chunk.setBlock(x + ldx, lcy, z + ldz, autumnLeaf(ldx, lcy, ldz));
+    };
+
+    for (int dy = -crown_layers; dy <= 0; ++dy) {
+        int radius = (dy == 0) ? 1 : crown_radius;
         int cy = trunk_top + dy;
         for (int dz = -radius; dz <= radius; ++dz) {
             for (int dx = -radius; dx <= radius; ++dx) {
-                if (std::abs(dx) == radius && std::abs(dz) == radius && dy == 0) continue;
-                if (dx == 0 && dz == 0 && dy <= -1) continue;
-                if (chunk.getBlock(x + dx, cy, z + dz) == BlockType::Air)
-                    chunk.setBlock(x + dx, cy, z + dz, autumnLeaf(x + dx, cy, z + dz));
+                if (std::abs(dx) == radius && std::abs(dz) == radius) continue;
+                if (dx == 0 && dz == 0 && dy < 0) continue;
+                placeAutumnLeaf(dx, cy, dz);
             }
         }
     }
@@ -533,10 +639,8 @@ static void placeAutumnTree(Chunk& chunk, int x, int z, int surface, uint32_t se
         if (cy >= CHUNK_SIZE_Y) break;
         int radius = (dy == 1) ? 1 : 0;
         for (int dz = -radius; dz <= radius; ++dz) {
-            for (int dx = -radius; dx <= radius; ++dx) {
-                if (chunk.getBlock(x + dx, cy, z + dz) == BlockType::Air)
-                    chunk.setBlock(x + dx, cy, z + dz, autumnLeaf(x + dx, cy, z + dz));
-            }
+            for (int dx = -radius; dx <= radius; ++dx)
+                placeAutumnLeaf(dx, cy, dz);
         }
     }
 }
@@ -1363,13 +1467,15 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             float variation = noise_.getVariation(wx, wz);
             float wP, wD, wT, wR, wSw, wM, wC, wSp, wAu;
             biomeWeights(temp, humid, variation, wP, wD, wT, wR, wSw, wM, wC, wSp, wAu);
-            (void)wP;
 
-            bool is_desert   = wD   > 0.25f;
-            bool is_snowy    = (wT + wM) > 0.25f;   // Tundra・Mountain のみ雪（Autumnは除外）
-            bool is_swamp    = wSw  > 0.25f;
-            bool is_mountain = wM   > 0.25f;
-            bool is_canyon   = wC   > 0.25f;
+            TerrainGenerator::BiomeType biome =
+                dominantBiome(wP, wD, wT, wR, wSw, wM, wC, wSp, wAu);
+            bool is_desert   = biome == TerrainGenerator::BiomeType::Desert;
+            bool is_snowy    = biome == TerrainGenerator::BiomeType::Tundra ||
+                               biome == TerrainGenerator::BiomeType::Mountain;
+            bool is_swamp    = biome == TerrainGenerator::BiomeType::Swamp;
+            bool is_mountain = biome == TerrainGenerator::BiomeType::Mountain;
+            bool is_canyon   = biome == TerrainGenerator::BiomeType::Canyon;
 
             BlockType top;
             if      (is_mountain && surface > 78) top = BlockType::Snow;
@@ -1474,22 +1580,23 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             float variation = noise_.getVariation(wx, wz);
             float wP, wD, wT, wR, wSw, wM, wC, wSp, wAu;
             biomeWeights(temp, humid, variation, wP, wD, wT, wR, wSw, wM, wC, wSp, wAu);
-            (void)wP;
+            TerrainGenerator::BiomeType biome =
+                dominantBiome(wP, wD, wT, wR, wSw, wM, wC, wSp, wAu);
 
             uint32_t chance = hash3(world_x + x, (int)seed_, world_z + z);
 
             // ── 山岳: 植生なし ────────────────────────────────────────────
-            if (wM > 0.30f) continue;
+            if (biome == TerrainGenerator::BiomeType::Mountain) continue;
 
             // ── 砂漠: サボテン ────────────────────────────────────────────
-            if (wD > 0.30f) {
+            if (biome == TerrainGenerator::BiomeType::Desert) {
                 if ((chance % 100u) < 4u && canPlaceCactusAt(chunk, x, z, surface))
                     placeCactus(chunk, x, z, surface, seed_);
                 continue;
             }
 
             // ── 峡谷: サボテンのみ ────────────────────────────────────────
-            if (wC > 0.30f) {
+            if (biome == TerrainGenerator::BiomeType::Canyon) {
                 if ((chance % 100u) < 3u && canPlaceCactusAt(chunk, x, z, surface))
                     placeCactus(chunk, x, z, surface, seed_);
                 continue;
@@ -1507,7 +1614,7 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             }
 
             // ── 春バイオーム: 桜の木と花 ──────────────────────────────────
-            if (wSp > 0.30f) {
+            if (biome == TerrainGenerator::BiomeType::Spring) {
                 if ((chance % 100u) < 10u && canPlaceTreeAt(chunk, x, z, surface))
                     placeSpringTree(chunk, x, z, surface, seed_);
                 else if ((chance >> 8) % 100u < 18u &&
@@ -1520,7 +1627,7 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             }
 
             // ── 秋バイオーム: 紅葉の木 ────────────────────────────────────
-            if (wAu > 0.30f) {
+            if (biome == TerrainGenerator::BiomeType::Autumn) {
                 if ((chance % 100u) < 8u && canPlaceTreeAt(chunk, x, z, surface))
                     placeAutumnTree(chunk, x, z, surface, seed_);
                 else if ((chance >> 8) % 100u < 10u &&
@@ -1530,7 +1637,7 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             }
 
             // ── 沼地: 沼の木（低密度）────────────────────────────────────
-            if (wSw > 0.30f) {
+            if (biome == TerrainGenerator::BiomeType::Swamp) {
                 if ((chance % 100u) < 8u && canPlaceTreeAt(chunk, x, z, surface, /*allow_dirt=*/true))
                     placeSwampTree(chunk, x, z, surface, seed_);
                 else if ((chance >> 8) % 100u < 2u &&
@@ -1543,7 +1650,8 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             }
 
             // ── 寒冷バイオーム(Tundra・Rocky): 松（針葉樹）───────────────
-            if ((wT + wR) > 0.30f) {
+            if (biome == TerrainGenerator::BiomeType::Tundra ||
+                biome == TerrainGenerator::BiomeType::Rocky) {
                 if ((chance % 100u) < 9u && canPlaceTreeAt(chunk, x, z, surface))
                     placePineTree(chunk, x, z, surface, seed_);
                 else if ((chance >> 8) % 100u < 1u &&
@@ -1556,7 +1664,7 @@ void TerrainGenerator::generate(Chunk& chunk) const {
             }
 
             // ── 平原: オーク（広葉樹）────────────────────────────────────
-            if (wP < 0.15f) continue;  // Plains 成分が薄い場所は木が少ない
+            if (biome != TerrainGenerator::BiomeType::Plains) continue;
             if ((chance % 100u) < 7u && canPlaceTreeAt(chunk, x, z, surface))
                 placeTree(chunk, x, z, surface, seed_);
             else if ((chance >> 8) % 100u < 2u &&

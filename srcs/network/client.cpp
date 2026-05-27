@@ -143,6 +143,8 @@ void NetworkClient::handlePacket(PacketType type, const uint8_t* payload,
             z.z           = entry.z;
             z.yaw         = entry.yaw;
             z.health      = entry.health;
+            z.fuse_timer  = entry.fuse_timer;
+            z.type        = static_cast<MobType>(entry.type);
             z.state       = static_cast<Zombie::State>(entry.state);
         }
         out.push_back(std::move(ev));
