@@ -1,4 +1,4 @@
-# ft_vox
+# ft_minecraft
 
 42Tokyoの課題として制作した、C++17 / OpenGL 4.1 製のMinecraft風ボクセルエンジンです。
 

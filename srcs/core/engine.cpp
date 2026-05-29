@@ -298,7 +298,7 @@ bool Engine::init(uint32_t seed, int width, int height) {
     width_  = mode->width;
     height_ = mode->height;
 
-    window_ = glfwCreateWindow(width_, height_, "ft_vox", monitor, nullptr);
+    window_ = glfwCreateWindow(width_, height_, "ft_minecraft", monitor, nullptr);
     if (!window_) {
         fprintf(stderr, "[Engine] glfwCreateWindow failed\n");
         glfwTerminate();

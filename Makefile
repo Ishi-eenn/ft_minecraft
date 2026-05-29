@@ -12,13 +12,13 @@ configure:
 	$(CONFIGURE)
 
 run: all
-	./ft_vox $(RUN_ARGS)
+	./ft_minecraft $(RUN_ARGS)
 
 clean:
 	if [ -d $(BUILD_DIR) ]; then rm -rf $(BUILD_DIR); fi
 
 fclean: clean
-	rm -f ft_vox
+	rm -f ft_minecraft
 
 re: fclean all
 
