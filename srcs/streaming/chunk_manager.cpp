@@ -154,6 +154,7 @@ void ChunkManager::update(float playerX, float playerZ, uint64_t frame) {
     drainTerrainDone();       // 地形完了 → World 登録 → mesh_queue_ へ
     processMeshQueue(4);      // メインスレッドでメッシュ構築（最大 4/frame）
     loadRadius(center);       // 未生成チャンクを gen_queue_ へ投入
+    pinTorchChunks();         // 松明を含むチャンクを LRU の先頭に保持
 
     if (frame % 3 == 0) {
         auto changed_water = world_.stepWater(
@@ -263,6 +264,56 @@ void ChunkManager::uploadPending(int max_per_frame) {
         if (c && c->is_dirty) {
             renderer_.uploadChunkMesh(c);
             ++n;
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// pinTorchChunks() — 松明を含むチャンクを LRU の先頭に保持する
+//
+// プレイヤーが遠くへ離れても、松明が置かれているチャンクは evict されないよう
+// 毎フレーム touch する。これによりプレイヤーが戻ったときに、チャンクの再生成
+// やメッシュ再ビルドの遅延なく即座に光源が機能する。
+//
+// 未ロードの松明チャンクは gen_queue_ にも投入してバックグラウンド生成を進める。
+// ─────────────────────────────────────────────────────────────────────────────
+void ChunkManager::pinTorchChunks() {
+    std::vector<WorldPos> torches = world_.torchPositions();
+    if (torches.empty()) return;
+
+    // 同じチャンクに複数の松明があってもチャンク単位で 1 回だけ処理する。
+    std::unordered_set<ChunkPos, ChunkPosHash> torch_chunks;
+    for (const WorldPos& tp : torches) {
+        int cx = (int)std::floor((float)tp.x / (float)CHUNK_SIZE_X);
+        int cz = (int)std::floor((float)tp.z / (float)CHUNK_SIZE_Z);
+        torch_chunks.insert({cx, cz});
+    }
+
+    for (const ChunkPos& p : torch_chunks) {
+        if (loaded_.contains(p)) {
+            // 既にロード済み → LRU の先頭へ
+            loaded_.touch(p);
+            continue;
+        }
+        // World に存在する（過去に生成された）→ LRU に再登録
+        Chunk* existing = world_.getChunk(p);
+        if (existing) {
+            auto evicted = loaded_.put(p, existing);
+            for (const ChunkPos& ep : evicted) {
+                if (Chunk* dead = world_.getChunk(ep)) renderer_.destroyChunkMesh(dead);
+                world_.unregisterChunk(ep);
+            }
+            mesh_queue_.insert(p);
+            continue;
+        }
+        // 未生成 → ワーカーへ
+        if (!gen_in_flight_.count(p)) {
+            gen_in_flight_.insert(p);
+            {
+                std::lock_guard<std::mutex> lock(gen_mutex_);
+                gen_queue_.push(p);
+            }
+            gen_cv_.notify_one();
         }
     }
 }

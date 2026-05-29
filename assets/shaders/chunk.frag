@@ -4,6 +4,7 @@ in float vLight;
 in float vLightShadow;
 in vec4  vShadowCoord;
 in float vFogFactor;
+in float vTorchLight;
 
 uniform sampler2D uAtlas;
 uniform sampler2D uShadowMap;
@@ -63,6 +64,15 @@ void main() {
     float light = vLightShadow * ssao + sun_direct * shadowFactor;
 
     vec3 lit = col.rgb * light;
+
+    // ── 松明光源: 暖色を加算 ───────────────────────────────────────────────
+    // 暗い場所ほど目立つように、light の不足分を埋める形でブレンド。
+    // 同時に warm tint (オレンジ寄り) も足し込み、ロウソク色の雰囲気を出す。
+    vec3 torch_warm = vec3(1.10, 0.88, 0.55);
+    lit += col.rgb * torch_warm * vTorchLight;
+    // オーバーブライト防止 (極端な白飛びを避ける)
+    lit = min(lit, col.rgb * 1.6);
+
     vec3 fogged = mix(lit, uFogColor, clamp(vFogFactor, 0.0, 1.0));
     FragColor = vec4(fogged, col.a);
 }

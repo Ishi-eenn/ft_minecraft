@@ -72,6 +72,8 @@ add_executable(
   srcs/world/terrain_gen.cpp
   srcs/world/mesh_builder.cpp
   srcs/world/world.cpp
+  srcs/world/inventory.cpp
+  srcs/world/recipe.cpp
   srcs/core/engine.cpp
   srcs/renderer/shader.cpp
   srcs/renderer/frustum.cpp

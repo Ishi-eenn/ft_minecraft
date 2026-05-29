@@ -58,6 +58,11 @@ public:
     void setTimeOfDay(float t);
     void setUnderwater(bool underwater) { underwater_ = underwater; }
 
+    // 松明光源 (forward point lights) の位置リストを設定する。
+    // 最大 MAX_TORCH_LIGHTS 件まで採用、それ以上は捨てる。
+    // chunk.vert で各頂点ごとに距離フォールオフを計算するために使われる。
+    void setTorchLights(const std::vector<glm::vec3>& positions);
+
     // Shadow mapping
     void updateShadowMatrix(float px, float py, float pz);
     void beginShadowPass();
@@ -84,8 +89,10 @@ private:
     void appendHeart(float* verts, int& count, float left, float top, float w, float h) const;
     void appendSignedNumberLeft(float* verts, int& count, int value, float left, float top, float w, float h, float gap) const;
 
-    static constexpr int SHADOW_MAP_SIZE = 2048;
-    static constexpr int SSAO_SAMPLES   = 64;
+    static constexpr int SHADOW_MAP_SIZE   = 2048;
+    static constexpr int SSAO_SAMPLES      = 64;
+    static constexpr int MAX_TORCH_LIGHTS  = 16;
+    static constexpr float TORCH_RANGE     = 10.0f;  // ブロック
 
     GLFWwindow*  window_  = nullptr;
     Shader       chunk_shader_;
@@ -150,4 +157,8 @@ private:
     float sky_ground_[3]   = {0.35f, 0.30f, 0.25f};
     float sun_color_[3]    = {1.00f, 0.98f, 0.85f};
     bool  underwater_      = false;
+
+    // 松明光源 (近傍の最大 MAX_TORCH_LIGHTS 件を格納する xyz パックド配列)
+    int   torch_count_           = 0;
+    float torch_positions_[MAX_TORCH_LIGHTS * 3] = {};
 };
