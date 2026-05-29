@@ -153,6 +153,23 @@ void World::applyMods(Chunk* chunk) const {
     }
 }
 
+std::vector<WorldPos> World::torchPositions() const {
+    std::vector<WorldPos> out;
+    for (const auto& [cpos, sub] : mods_) {
+        for (const auto& [key, type] : sub) {
+            if (type != BlockType::Torch) continue;
+            int lx  = key / (CHUNK_SIZE_Z * CHUNK_SIZE_Y);
+            int rem = key % (CHUNK_SIZE_Z * CHUNK_SIZE_Y);
+            int lz  = rem / CHUNK_SIZE_Y;
+            int ly  = rem % CHUNK_SIZE_Y;
+            int wx  = cpos.x * CHUNK_SIZE_X + lx;
+            int wz  = cpos.z * CHUNK_SIZE_Z + lz;
+            out.push_back({wx, ly, wz});
+        }
+    }
+    return out;
+}
+
 void World::recordMod(ChunkPos pos, int lx, int ly, int lz, BlockType type) {
     if (ly < 0 || ly >= CHUNK_SIZE_Y) return;
     if (lx < 0 || lx >= CHUNK_SIZE_X || lz < 0 || lz >= CHUNK_SIZE_Z) return;
@@ -183,7 +200,8 @@ bool World::isSolidBlock(BlockType type) const {
         && type != BlockType::Water
         && type != BlockType::ShortGrass
         && type != BlockType::Flower
-        && type != BlockType::Mushroom;
+        && type != BlockType::Mushroom
+        && type != BlockType::Torch;
 }
 
 // チャンク座標が指定範囲内に入っているか判定（水シミュレーション範囲の絞り込みに使う）

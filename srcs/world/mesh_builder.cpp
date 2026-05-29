@@ -84,10 +84,15 @@ static bool isDecorativePlant(BlockType type) {
            type == BlockType::Mushroom;
 }
 
+static bool isTorchBlock(BlockType type) {
+    return type == BlockType::Torch;
+}
+
 static bool isFaceTransparent(BlockType type) {
     return type == BlockType::Air ||
            type == BlockType::Water ||
-           isDecorativePlant(type);
+           isDecorativePlant(type) ||
+           isTorchBlock(type);
 }
 
 static float plantHeight(BlockType type) {
@@ -117,6 +122,127 @@ static void addPlantQuad(std::vector<Vertex>& verts,
     // 両面から見えるよう、同じ板を表裏両方向の巻き順で描く。
     indices.insert(indices.end(), {b, b+1, b+2, b, b+2, b+3,
                                    b, b+2, b+1, b, b+3, b+2});
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 任意サイズの直方体ボックス（6面）をメッシュへ追加するヘルパー。
+// 松明の「細い棒」と「炎の小箱」をそれぞれボックスで生成するために使う。
+// 各面とも同じ UV 矩形 (u0,v0,uw,vh) を貼る（ボックスが小さいため引き伸ばしは問題なし）。
+// ─────────────────────────────────────────────────────────────────────────────
+static void addBox(std::vector<Vertex>& verts,
+                   std::vector<uint32_t>& indices,
+                   float minx, float miny, float minz,
+                   float maxx, float maxy, float maxz,
+                   float u0, float v0, float uw, float vh) {
+    // 6面: top, bottom, north(-Z), south(+Z), east(+X), west(-X)
+    // 各面の 4 頂点を CCW で定義（外から見て反時計回り）
+    const float P[8][3] = {
+        {minx, miny, minz}, // 0
+        {maxx, miny, minz}, // 1
+        {maxx, miny, maxz}, // 2
+        {minx, miny, maxz}, // 3
+        {minx, maxy, minz}, // 4
+        {maxx, maxy, minz}, // 5
+        {maxx, maxy, maxz}, // 6
+        {minx, maxy, maxz}, // 7
+    };
+    const int FACES[6][4] = {
+        {7, 6, 5, 4}, // top    +Y  (n = 0,+1,0)
+        {0, 1, 2, 3}, // bottom -Y
+        {4, 5, 1, 0}, // north  -Z
+        {6, 7, 3, 2}, // south  +Z
+        {5, 6, 2, 1}, // east   +X
+        {7, 4, 0, 3}, // west   -X
+    };
+    const float N[6][3] = {
+        { 0, 1, 0}, { 0,-1, 0},
+        { 0, 0,-1}, { 0, 0, 1},
+        { 1, 0, 0}, {-1, 0, 0},
+    };
+    const float UV[4][2] = {
+        {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}
+    };
+    for (int f = 0; f < 6; ++f) {
+        uint32_t base = (uint32_t)verts.size();
+        for (int i = 0; i < 4; ++i) {
+            int p = FACES[f][i];
+            Vertex v{};
+            v.x = P[p][0]; v.y = P[p][1]; v.z = P[p][2];
+            v.u = u0 + UV[i][0] * uw;
+            v.v = v0 + UV[i][1] * vh;
+            v.nx = N[f][0]; v.ny = N[f][1]; v.nz = N[f][2];
+            verts.push_back(v);
+        }
+        indices.insert(indices.end(),
+                       {base, base + 1, base + 2,
+                        base, base + 2, base + 3});
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// addTorchModel() — 設置された松明の 3D メッシュを生成
+//
+// 構造（Minecraft の torch モデルを踏襲）:
+//   ・棒部分: 2x10x2 の細い角柱（中央寄り、ブロック底〜10/16 高さ）
+//             テクスチャは Wood タイルを流用（茶色の木目）。
+//   ・炎部分: クロスビルボード = 2 枚の垂直な板を X 字に交差させる。
+//             各板は 8/16 × 5/16 の矩形で、Torch タイル上端 4px の炎パターンを
+//             透過テクスチャでサンプル。alpha discard で炎の形状だけが残る。
+// ─────────────────────────────────────────────────────────────────────────────
+static void addTorchModel(std::vector<Vertex>& verts,
+                          std::vector<uint32_t>& indices,
+                          int x, int y, int z) {
+    const int cols = ATLAS_COLS;
+    const int rows = 4;
+    const float icols = 1.0f / (float)cols;
+    const float irows = 1.0f / (float)rows;
+
+    // 棒: Wood タイル (tile=7, col=7, row=0) を流用
+    const int wood_tile = (int)BlockType::Wood;
+    const float wu0 = (float)(wood_tile % cols) * icols;
+    const float wv0 = (float)(wood_tile / cols) * irows;
+
+    // 炎: Torch タイル (tile=20, col=4, row=2) の上端 4px (= 4/16 of tile)
+    const int torch_tile = (int)BlockType::Torch;
+    const float tu0 = (float)(torch_tile % cols) * icols;
+    const float tv0 = (float)(torch_tile / cols) * irows;
+    const float flame_vh = irows * (4.0f / 16.0f);
+
+    const float fx = (float)x;
+    const float fy = (float)y;
+    const float fz = (float)z;
+
+    // 棒: x:[7/16,9/16], y:[0,10/16], z:[7/16,9/16]
+    addBox(verts, indices,
+           fx + 7.0f/16.0f, fy,                 fz + 7.0f/16.0f,
+           fx + 9.0f/16.0f, fy + 10.0f/16.0f,   fz + 9.0f/16.0f,
+           wu0, wv0, icols, irows);
+
+    // 炎クロスビルボード: 2 枚の垂直平面を X 字に配置。
+    // 各板の幅 = 8/16, 高さ = 5/16, 棒の真上 (y=10/16〜15/16) に中央配置。
+    // addPlantQuad は両面描画（CCW + CW 両方）と alpha discard 対応の UV を持つ。
+    const float fy0 = fy + 10.0f / 16.0f;   // 棒の上
+    const float fy1 = fy + 15.0f / 16.0f;   // 炎の先端（ブロック上端より少し下）
+    const float cx  = fx + 8.0f / 16.0f;
+    const float cz  = fz + 8.0f / 16.0f;
+    const float hw  = 4.0f / 16.0f;          // half-width → 板幅 8/16
+
+    // Quad A: Z = cz 平面に立つ垂直板（X 軸方向に広がる）
+    const float qA[4][3] = {
+        {cx - hw, fy0, cz},  // p0: 底-左
+        {cx + hw, fy0, cz},  // p1: 底-右
+        {cx + hw, fy1, cz},  // p2: 頂-右
+        {cx - hw, fy1, cz},  // p3: 頂-左
+    };
+    // Quad B: X = cx 平面に立つ垂直板（Z 軸方向に広がる）
+    const float qB[4][3] = {
+        {cx, fy0, cz - hw},
+        {cx, fy0, cz + hw},
+        {cx, fy1, cz + hw},
+        {cx, fy1, cz - hw},
+    };
+    addPlantQuad(verts, indices, qA, tu0, tv0, icols, flame_vh);
+    addPlantQuad(verts, indices, qB, tu0, tv0, icols, flame_vh);
 }
 
 static void addPlantCross(std::vector<Vertex>& verts,
@@ -367,6 +493,11 @@ void MeshBuilder::build(Chunk& chunk, const ChunkNeighbors& neighbors) {
 
                 if (isDecorativePlant(t)) {
                     addPlantCross(chunk.vertices, chunk.indices, x, y, z, t);
+                    continue;
+                }
+
+                if (isTorchBlock(t)) {
+                    addTorchModel(chunk.vertices, chunk.indices, x, y, z);
                     continue;
                 }
 

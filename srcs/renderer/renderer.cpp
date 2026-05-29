@@ -1024,6 +1024,7 @@ void Renderer::drawHotbar(const Inventory& inv) {
             const ItemStack& s = inv.slots[i];
             if (s.type == BlockType::Air || s.count <= 0) continue;
             if (s.type == BlockType::Bow) continue;
+            if (s.type == BlockType::Torch) continue;
 
             AtlasUV uv = atlas_.getUV(s.type);
             float uc = (uv.u0 + uv.u1) * 0.5f;
@@ -1085,7 +1086,7 @@ void Renderer::drawHotbar(const Inventory& inv) {
         }
     }
 
-    // 弓はブロックではないので、Bow.png の平面アイコンとして表示する。
+    // 弓・松明は立方体としてではなく 2D アイコンとして表示する。
     {
         hotbar_shader_.setFloat("uBright", 1.0f);
         float verts[HOTBAR_SIZE * 6 * 4] = {};
@@ -1093,9 +1094,10 @@ void Renderer::drawHotbar(const Inventory& inv) {
 
         for (int i = 0; i < HOTBAR_SIZE; ++i) {
             const ItemStack& s = inv.slots[i];
-            if (s.type != BlockType::Bow || s.count <= 0) continue;
+            if ((s.type != BlockType::Bow && s.type != BlockType::Torch)
+                || s.count <= 0) continue;
 
-            AtlasUV uv = atlas_.getUV(BlockType::Bow);
+            AtlasUV uv = atlas_.getUV(s.type);
             const float cx = nx(sx0_px + i * (SLOT_PX + GAP_PX) + SLOT_PX * 0.5f);
             const float cy = ny(BOTTOM_PX + SLOT_PX * 0.5f);
             const float iw = 34.0f / hw;
@@ -1144,9 +1146,9 @@ void Renderer::drawHotbar(const Inventory& inv) {
         appendLine(verts.data(), cnt, x0, sy0, x0, sy1);
         appendLine(verts.data(), cnt, x1, sy0, x1, sy1);
 
-        // 個数（2個以上のとき右下に表示）
+        // 個数（2個以上のとき右下に表示）。Torch は無限供給なので個数は隠す。
         const ItemStack& s = inv.slots[i];
-        if (s.type != BlockType::Air && s.count > 1) {
+        if (s.type != BlockType::Air && s.type != BlockType::Torch && s.count > 1) {
             float dw = 8.0f / hw, dh = 11.0f / hh, dg = 2.0f / hw;
             appendNumber(verts.data(), cnt, s.count,
                          x1 - 3.0f / hw, sy0 + dh + 3.0f / hh, dw, dh, dg);
@@ -1354,6 +1356,24 @@ static void setChunkLightingUniforms(Shader& shader,
     shader.setFloat("uSunStrength", sun_strength);
 }
 
+void Renderer::setTorchLights(const std::vector<glm::vec3>& positions) {
+    torch_count_ = (int)std::min((size_t)MAX_TORCH_LIGHTS, positions.size());
+    for (int i = 0; i < torch_count_; ++i) {
+        torch_positions_[i * 3 + 0] = positions[i].x;
+        torch_positions_[i * 3 + 1] = positions[i].y;
+        torch_positions_[i * 3 + 2] = positions[i].z;
+    }
+}
+
+// chunk.vert の uTorches/uTorchCount/uTorchRange を一括で設定する。
+static void setTorchUniforms(Shader& shader, int count,
+                             const float* positions_xyz, float range) {
+    shader.setInt  ("uTorchCount", count);
+    shader.setFloat("uTorchRange", range);
+    if (count > 0)
+        shader.setVec3Array("uTorches[0]", count, positions_xyz);
+}
+
 static void setFogUniforms(Shader& shader, const float sky_horizon[3],
                            bool underwater) {
     if (underwater) {
@@ -1392,6 +1412,7 @@ void Renderer::drawChunk(const Chunk* chunk, const float* view4x4, const float* 
     setChunkLightingUniforms(chunk_shader_, sun_dir_, ambient_, sun_strength_);
     setFogUniforms(chunk_shader_, sky_horizon_, underwater_);
     chunk_shader_.setFloat("uSunStrength", sun_strength_);
+    setTorchUniforms(chunk_shader_, torch_count_, torch_positions_, TORCH_RANGE);
 
     atlas_.bind(0);
     chunk_shader_.setInt("uAtlas", 0);
@@ -1445,6 +1466,7 @@ void Renderer::drawChunkWater(const Chunk* chunk, const float* view4x4, const fl
     setChunkLightingUniforms(chunk_shader_, sun_dir_, ambient_, sun_strength_);
     setFogUniforms(chunk_shader_, sky_horizon_, underwater_);
     chunk_shader_.setFloat("uSunStrength", sun_strength_);
+    setTorchUniforms(chunk_shader_, torch_count_, torch_positions_, TORCH_RANGE);
 
     atlas_.bind(0);
     chunk_shader_.setInt("uAtlas", 0);
@@ -1546,6 +1568,12 @@ void Renderer::beginShadowPass() {
     // シャドウマップから除外されてしまうため、通常の GL_BACK カリングのままにする。
     glEnable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(2.0f, 4.0f);
+
+    // 松明炎のような透過テクセルが「四角い影」を作らないよう、シャドウ FBO の
+    // フラグメントシェーダーでアルファ discard する。アトラスをスロット 0 にバインド。
+    atlas_.bind(0);
+    shadow_shader_.use();
+    shadow_shader_.setInt("uAtlas", 0);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1761,6 +1789,12 @@ void Renderer::beginGBufferPass() {
     glBindFramebuffer(GL_FRAMEBUFFER, gbuffer_fbo_);
     glViewport(0, 0, width_, height_);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // 松明炎のような透過テクセルが SSAO で四角いオクルーダー扱いされないよう、
+    // GBuffer フラグメントシェーダーでアルファ discard する。アトラスをスロット 0 に。
+    atlas_.bind(0);
+    gbuffer_shader_.use();
+    gbuffer_shader_.setInt("uAtlas", 0);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

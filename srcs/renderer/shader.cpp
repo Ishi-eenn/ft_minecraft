@@ -198,6 +198,15 @@ void Shader::setVec3(const char* name, float x, float y, float z) const {
         glUniform3f(loc, x, y, z);
 }
 
+// 3次元ベクトルの配列を送る（例: 松明光源の位置リスト）
+// data は count * 3 個の float が連続して並んだ配列を指す。
+void Shader::setVec3Array(const char* name, int count, const float* data) const {
+    if (count <= 0) return;
+    GLint loc = glGetUniformLocation(program_, name);
+    if (loc != -1)
+        glUniform3fv(loc, count, data);
+}
+
 // 4次元ベクトルを送る（例: RGBA 色）
 void Shader::setVec4(const char* name, float x, float y, float z, float w) const {
     GLint loc = glGetUniformLocation(program_, name);

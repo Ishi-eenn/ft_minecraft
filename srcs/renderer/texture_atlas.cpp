@@ -566,6 +566,88 @@ static void fillMushroomPlant(uint8_t* buf, int atlas_w, int tile_col, int tile_
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// fillStick() — 棒（クラフト素材）テクスチャを生成
+//
+// 中央 2px に茶色の棒。周囲は透明。
+// 3D 松明メッシュの棒部分にも貼られる（タイル全体を細い棒の側面として使う）。
+// ─────────────────────────────────────────────────────────────────────────────
+static void fillStick(uint8_t* buf, int atlas_w, int tile_col, int tile_row) {
+    const int tw = ATLAS_TILE_SIZE;
+    const int ox = tile_col * tw;
+    const int oy = tile_row * tw;
+    for (int py = 0; py < tw; ++py) {
+        for (int px = 0; px < tw; ++px) {
+            bool stick = (px >= 7 && px <= 8);
+            if (!stick) {
+                setPixel(buf, atlas_w, ox, oy, px, py, 0, 0, 0, 0);
+                continue;
+            }
+            int n = hash2(px, py, 1301);
+            int r = 138 + ((n % 24) - 12);
+            int g =  98 + ((n % 18) -  9);
+            int b =  56 + ((n % 14) -  7);
+            // 縦の木目（暗いライン）
+            if (px == 7 && (py % 3 == 0)) { r -= 22; g -= 18; b -= 10; }
+            setPixel(buf, atlas_w, ox, oy, px, py, r, g, b);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// fillTorch() — 松明アイコンテクスチャを生成
+//
+// 16x16: 下 12px が茶色の棒（細い 2px 幅）、上 4px が Minecraft 風の炎。
+// ホットバーの 2D アイコン表示と、3D 設置メッシュの炎部分のサンプリングで使う。
+// 炎は白熱(W) → 黄(Y/y) → オレンジ(O) のグラデーションで本家の見た目に寄せる。
+// ─────────────────────────────────────────────────────────────────────────────
+static void fillTorch(uint8_t* buf, int atlas_w, int tile_col, int tile_row) {
+    const int tw = ATLAS_TILE_SIZE;
+    const int ox = tile_col * tw;
+    const int oy = tile_row * tw;
+
+    // 炎の 4×16 ピクセルマップ（py=0 は炎の先端、py=3 は基部 = 棒の真上）
+    // '.' = 透明, 'W' = 白熱中心, 'Y' = 明るい黄, 'y' = 黄, 'O' = オレンジ, 'o' = 暗オレンジ
+    static const char* kFlame[4] = {
+        ".......YY.......",
+        "......YWWY......",
+        ".....yOWWOy.....",
+        "....oOyWWyOo....",
+    };
+
+    auto putFlame = [&](int px, int py, char c) {
+        int r = 0, g = 0, b = 0, a = 0;
+        switch (c) {
+            case 'W': r = 255; g = 252; b = 220; a = 255; break;
+            case 'Y': r = 255; g = 232; b =  80; a = 255; break;
+            case 'y': r = 250; g = 200; b =  50; a = 255; break;
+            case 'O': r = 245; g = 148; b =  32; a = 255; break;
+            case 'o': r = 198; g =  92; b =  18; a = 255; break;
+            default:  a = 0; break;
+        }
+        setPixel(buf, atlas_w, ox, oy, px, py, r, g, b, a);
+    };
+
+    for (int py = 0; py < tw; ++py) {
+        for (int px = 0; px < tw; ++px) {
+            if (py < 4) {
+                // 炎エリア
+                putFlame(px, py, kFlame[py][px]);
+            } else if (px == 7 || px == 8) {
+                // 棒エリア（中央 2px）
+                int n = hash2(px, py, 1301);
+                int r = 138 + ((n % 24) - 12);
+                int g =  98 + ((n % 18) -  9);
+                int b =  56 + ((n % 14) -  7);
+                if (px == 7 && (py % 3 == 0)) { r -= 22; g -= 18; b -= 10; }
+                setPixel(buf, atlas_w, ox, oy, px, py, r, g, b);
+            } else {
+                setPixel(buf, atlas_w, ox, oy, px, py, 0, 0, 0, 0);
+            }
+        }
+    }
+}
+
 // 弓アイコン16x16ピクセルマップを焼き込む
 static void fillBow(uint8_t* buf, int atlas_w, int tile_col, int tile_row) {
     const int tw = ATLAS_TILE_SIZE;
@@ -647,6 +729,8 @@ bool TextureAtlas::generate() {
     fillColoredLeaves(pixels, atlas_w, 0, 2, 210, 140, 160, 20, 12, 14, 511, 719); // PinkLeaves   tile=16 (桜ピンク)
     fillColoredLeaves(pixels, atlas_w, 1, 2, 195, 105,  30, 22, 18, 10, 613, 821); // OrangeLeaves tile=17 (紅葉オレンジ)
     fillBow      (pixels, atlas_w, 2, 2);            // Bow        tile=18
+    fillStick    (pixels, atlas_w, 3, 2);            // Stick      tile=19
+    fillTorch    (pixels, atlas_w, 4, 2);            // Torch      tile=20
 
     // GPU にテクスチャを作成して転送する
     glGenTextures(1, &tex_id_);

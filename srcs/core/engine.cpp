@@ -147,6 +147,9 @@ static void rebuildModified(int wx, int wz, ChunkManager& mgr) {
 static void inventoryAdd(Inventory& inv, BlockType type) {
     if (type == BlockType::Air || type == BlockType::Water ||
         type == BlockType::ShortGrass || isItem(type)) return;
+    // Torch はスロット 8 に無限補充されるため、拾っても追加せず捨てる
+    // （インベントリが松明で埋まるのを防ぐ）
+    if (type == BlockType::Torch) return;
     for (int i = 0; i < HOTBAR_SIZE; ++i) {
         if (inv.slots[i].type == type && inv.slots[i].count < STACK_MAX) {
             ++inv.slots[i].count;
@@ -362,6 +365,8 @@ bool Engine::init(uint32_t seed, int width, int height) {
 
     // 弓を最後のホットバースロットに常備（無限矢扱い）
     impl_->inventory.slots[HOTBAR_SIZE - 1] = {BlockType::Bow, 1};
+    // 松明をスロット 8（インデックス 7）に常備（無限供給）
+    impl_->inventory.slots[HOTBAR_SIZE - 2] = {BlockType::Torch, STACK_MAX};
 
     running_ = true;
     fprintf(stderr, "[Engine] init OK  seed=%u  %dx%d\n", seed, width_, height_);
@@ -461,7 +466,8 @@ void Engine::run() {
                 && t != BlockType::Water
                 && t != BlockType::ShortGrass
                 && t != BlockType::Flower
-                && t != BlockType::Mushroom;
+                && t != BlockType::Mushroom
+                && t != BlockType::Torch;
         };
         // isWater: 「このブロックは水か？」を調べる関数。
         // 水中では重力・移動速度が変わる。
@@ -581,6 +587,13 @@ void Engine::run() {
         {
             InputHandler& inp = impl_->player.input();
             Inventory&    inv = impl_->inventory;
+
+            // 松明スロット（インデックス 7 = 数字キー 8）を毎フレーム補充する。
+            // 「常に入れておく」要件のため、設置で減っても次フレームで満タンに戻る。
+            if (inv.slots[HOTBAR_SIZE - 2].type != BlockType::Torch ||
+                inv.slots[HOTBAR_SIZE - 2].count < STACK_MAX) {
+                inv.slots[HOTBAR_SIZE - 2] = {BlockType::Torch, STACK_MAX};
+            }
 
             // キー 1〜9: ホットバースロットを選択（ワンショット: 前フレームと差分）
             static bool prev_num[9] = {};
@@ -806,6 +819,39 @@ void Engine::run() {
         // プレイヤーの周囲のチャンクを読み込み、遠いチャンクを破棄する。
         // 毎フレーム数チャンクずつ処理し、ゲームが止まらないようにする。
         impl_->chunk_mgr->update(ppos.x, ppos.z, frame_);
+
+        // ── 松明光源の近傍 16 件をシェーダーへ送る ───────────────────────────
+        // World が持つ全松明をプレイヤー距離でソートし、近い順に最大 16 件選別。
+        // chunk.vert が頂点ごとに距離フォールオフを計算する。
+        {
+            std::vector<WorldPos> all = impl_->world.torchPositions();
+            struct Scored { glm::vec3 pos; float d2; };
+            std::vector<Scored> scored;
+            scored.reserve(all.size());
+            const float cull_d2 = 64.0f * 64.0f;  // 64 ブロック超は無視 (range 10 なので余裕)
+            for (const WorldPos& tp : all) {
+                glm::vec3 p((float)tp.x + 0.5f,
+                            (float)tp.y + 0.6f,   // 炎中央 (棒+10/16〜炎+15/16の中間)
+                            (float)tp.z + 0.5f);
+                glm::vec3 d = p - ppos;
+                float d2 = d.x*d.x + d.y*d.y + d.z*d.z;
+                if (d2 > cull_d2) continue;
+                scored.push_back({p, d2});
+            }
+            constexpr size_t kMaxLights = 16;
+            if (scored.size() > kMaxLights) {
+                std::nth_element(scored.begin(), scored.begin() + kMaxLights,
+                                 scored.end(),
+                                 [](const Scored& a, const Scored& b) {
+                                     return a.d2 < b.d2;
+                                 });
+                scored.resize(kMaxLights);
+            }
+            std::vector<glm::vec3> near_lights;
+            near_lights.reserve(scored.size());
+            for (const Scored& s : scored) near_lights.push_back(s.pos);
+            impl_->renderer.setTorchLights(near_lights);
+        }
 
         // ── 行列の計算 ───────────────────────────────────────────────────────
         // 【View行列】: カメラの位置・向きによって「ワールドがどう見えるか」を表す行列。
