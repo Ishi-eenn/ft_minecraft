@@ -39,6 +39,22 @@ static const struct { char c; Glyph g; } kGlyphs[] = {
         {kL, kT, kR,  kT},         // top bar
         {0.5f,kB, 0.5f,kT},        // center vert
     }}},
+    {'M', {4, {
+        {kL,kB,kL,kT},             // left vert
+        {kR,kB,kR,kT},             // right vert
+        {kL,kT,0.5f,kM},           // left diagonal
+        {0.5f,kM,kR,kT},           // right diagonal
+    }}},
+    {'I', {3, {
+        {kL,kT,kR,kT},             // top
+        {0.5f,kB,0.5f,kT},         // center vert
+        {kL,kB,kR,kB},             // bottom
+    }}},
+    {'N', {3, {
+        {kL,kB,kL,kT},             // left vert
+        {kR,kB,kR,kT},             // right vert
+        {kL,kT,kR,kB},             // diagonal
+    }}},
     {'_', {1, {
         {kL,0.08f,kR,0.08f},       // underscore
     }}},
@@ -225,17 +241,17 @@ void TitleScreen::buildTextBuffers() {
     float prompt_v[kBufSize] = {};
     int   tc = 0, pc = 0;
 
-    // ── Title "FT_VOX" ────────────────────────────────────────────────────────
-    const char*  title  = "FT_VOX";
-    const float  t_cw   = 0.115f;
-    const float  t_ch   = 0.175f;
-    const float  t_gap  = 0.028f;
+    // ── Title "FT_MINECRAFT" ──────────────────────────────────────────────────
+    const char*  title  = "FT_MINECRAFT";
+    const float  t_cw   = 0.072f;
+    const float  t_ch   = 0.125f;
+    const float  t_gap  = 0.016f;
     float t_w = textWidth(title, t_cw, t_gap);
     appendText(title_v, tc, title,
                -t_w * 0.5f, 0.58f, t_cw, t_ch, t_gap);
 
     // Thin separator line below title
-    appendSeg(title_v, tc, -0.32f, 0.54f, 0.32f, 0.54f);
+    appendSeg(title_v, tc, -t_w * 0.5f, 0.54f, t_w * 0.5f, 0.54f);
 
     title_cnt_ = tc / 2;
 

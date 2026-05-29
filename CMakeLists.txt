@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(ft_vox LANGUAGES C CXX)
+project(ft_minecraft LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-option(FT_VOX_FETCH_DEPS "Fetch third-party dependencies into the build tree" ON)
+option(FT_MINECRAFT_FETCH_DEPS "Fetch third-party dependencies into the build tree" ON)
 
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -20,7 +20,7 @@ include(FetchContent)
 find_package(OpenGL REQUIRED)
 find_package(Threads REQUIRED)
 
-if(FT_VOX_FETCH_DEPS)
+if(FT_MINECRAFT_FETCH_DEPS)
   FetchContent_Declare(
     glfw
     GIT_REPOSITORY https://github.com/glfw/glfw.git
@@ -49,20 +49,20 @@ if(FT_VOX_FETCH_DEPS)
     FetchContent_Populate(fastnoiselite)
   endif()
 
-  add_library(ft_vox_fastnoise INTERFACE)
+  add_library(ft_minecraft_fastnoise INTERFACE)
   target_include_directories(
-    ft_vox_fastnoise
+    ft_minecraft_fastnoise
     INTERFACE
       ${fastnoiselite_SOURCE_DIR}/Cpp
   )
 else()
   find_package(glfw3 REQUIRED)
   find_package(glm CONFIG REQUIRED)
-  message(FATAL_ERROR "FT_VOX_FETCH_DEPS=OFF is not fully wired yet. Reconfigure with -DFT_VOX_FETCH_DEPS=ON.")
+  message(FATAL_ERROR "FT_MINECRAFT_FETCH_DEPS=OFF is not fully wired yet. Reconfigure with -DFT_MINECRAFT_FETCH_DEPS=ON.")
 endif()
 
 add_executable(
-  ft_vox
+  ft_minecraft
   srcs/main.cpp
   srcs/player/input_handler.cpp
   srcs/player/camera.cpp
@@ -91,27 +91,27 @@ add_executable(
 )
 
 target_include_directories(
-  ft_vox
+  ft_minecraft
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/srcs
     ${glfw_SOURCE_DIR}/deps
 )
 
-target_compile_definitions(ft_vox PRIVATE GLFW_INCLUDE_NONE)
+target_compile_definitions(ft_minecraft PRIVATE GLFW_INCLUDE_NONE)
 
 target_link_libraries(
-  ft_vox
+  ft_minecraft
   PRIVATE
     OpenGL::GL
     glfw
     glm::glm
-    ft_vox_fastnoise
+    ft_minecraft_fastnoise
     Threads::Threads
 )
 
 set_target_properties(
-  ft_vox
+  ft_minecraft
   PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}
 )

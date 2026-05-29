@@ -14,9 +14,9 @@
 #include <cstring>
 
 // Usage:
-//   ./ft_vox [seed]                        — single-player
-//   ./ft_vox --server [port] [seed]        — headless server
-//   ./ft_vox --connect <ip> [port] [seed]  — multiplayer client
+//   ./ft_minecraft [seed]                        — single-player
+//   ./ft_minecraft --server [port] [seed]        — headless server
+//   ./ft_minecraft --connect <ip> [port] [seed]  — multiplayer client
 
 int main(int argc, char** argv) {
     // ── ヘッドレスサーバーモード ─────────────────────────────────────────────
@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
     uint32_t    seed         = 42;
 
     if (argc >= 2 && std::strcmp(argv[1], "--connect") == 0) {
-        if (argc < 3) { fprintf(stderr, "Usage: ft_vox --connect <ip> [port] [seed]\n"); return 1; }
+        if (argc < 3) { fprintf(stderr, "Usage: ft_minecraft --connect <ip> [port] [seed]\n"); return 1; }
         connect_host = argv[2];
         if (argc >= 4) connect_port = (uint16_t)std::atoi(argv[3]);
         if (argc >= 5) seed         = (uint32_t)std::atol(argv[4]);
