@@ -566,40 +566,46 @@ static void fillMushroomPlant(uint8_t* buf, int atlas_w, int tile_col, int tile_
     }
 }
 
-// 弓アイコン: 茶色の弦と弓本体を 16×16 タイルに描く
+// 弓アイコン16x16ピクセルマップを焼き込む
 static void fillBow(uint8_t* buf, int atlas_w, int tile_col, int tile_row) {
     const int tw = ATLAS_TILE_SIZE;
     const int ox = tile_col * tw;
     const int oy = tile_row * tw;
-    for (int py = 0; py < tw; ++py) {
-        for (int px = 0; px < tw; ++px) {
-            int dx = px - 7;
-            int dy = py - 7;
-            int r2 = dx * dx + dy * dy;
-            // 弓本体（円弧の左半分）
-            bool bow_arc = (r2 >= 36 && r2 <= 49) && (px <= 8);
-            // 弦（右側の縦線）
-            bool string  = (px == 10 && py >= 3 && py <= 13);
-            // グリップ
-            bool grip    = (px >= 7 && px <= 8 && py >= 6 && py <= 9);
-            // 矢じり（中央の矢）
-            bool shaft   = (py == 7 && px >= 4 && px <= 12);
-            bool tip     = (px == 13 && py >= 6 && py <= 8) ||
-                           (px == 12 && (py == 6 || py == 8));
-            if (bow_arc || grip) {
-                int n = hash2(px, py, 2207);
-                setPixel(buf, atlas_w, ox, oy, px, py,
-                         110 + (n % 28), 68 + (n % 22), 32 + (n % 18));
-            } else if (string) {
-                setPixel(buf, atlas_w, ox, oy, px, py, 230, 220, 200);
-            } else if (tip) {
-                setPixel(buf, atlas_w, ox, oy, px, py, 200, 200, 210);
-            } else if (shaft) {
-                setPixel(buf, atlas_w, ox, oy, px, py, 180, 130, 80);
-            } else {
-                setPixel(buf, atlas_w, ox, oy, px, py, 0, 0, 0, 0);
-            }
+    static const char* pix[16] = {
+        "................",
+        "...........bbbb.",
+        "........bbbcddce",
+        "......bbcdceeee.",
+        ".....bfdeee..g..",
+        "....bfhf....g...",
+        "...bfhf....g....",
+        "...bdf....g.....",
+        "..bce....g......",
+        "..bde...g.......",
+        "..bce..g........",
+        ".bce..g.........",
+        ".bde.g..........",
+        ".bdeg...........",
+        ".bce............",
+        "..e.............",
+    };
+
+    auto put = [&](int px, int py, char c) {
+        switch (c) {
+            case 'b': setPixel(buf, atlas_w, ox, oy, px, py,  73,  54,  21); break;
+            case 'c': setPixel(buf, atlas_w, ox, oy, px, py, 137, 103,  39); break;
+            case 'd': setPixel(buf, atlas_w, ox, oy, px, py, 104,  78,  30); break;
+            case 'e': setPixel(buf, atlas_w, ox, oy, px, py,  40,  30,  11); break;
+            case 'f': setPixel(buf, atlas_w, ox, oy, px, py, 107, 107, 107); break;
+            case 'g': setPixel(buf, atlas_w, ox, oy, px, py,  68,  68,  68); break;
+            case 'h': setPixel(buf, atlas_w, ox, oy, px, py, 150, 150, 150); break;
+            default:  setPixel(buf, atlas_w, ox, oy, px, py,   0,   0,   0, 0); break;
         }
+    };
+
+    for (int py = 0; py < tw; ++py) {
+        for (int px = 0; px < tw; ++px)
+            put(px, py, pix[py][px]);
     }
 }
 

@@ -905,10 +905,16 @@ void Engine::run() {
             impl_->renderer.drawUnderwaterOverlay();
 
         // 一人称ハンドアニメーション（死亡時は非表示）
-        if (!impl_->player_dead)
+        if (!impl_->player_dead) {
+            const bool bow_held =
+                impl_->inventory.slots[impl_->inventory.selected].type == BlockType::Bow;
+            const float charge_ratio = std::min(impl_->bow_charge_time / 1.0f, 1.0f);
             impl_->renderer.drawFirstPersonHand(
                 impl_->local_walk_phase,
-                impl_->attack_sync_timer / 0.28f);
+                impl_->attack_sync_timer / 0.28f,
+                bow_held,
+                charge_ratio);
+        }
 
         // HUD（クロスヘア＋FPS＋座標表示）を最前面に描画
         impl_->renderer.drawHud(fps_display,
