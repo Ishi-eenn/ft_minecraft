@@ -17,4 +17,8 @@ public:
     virtual uint32_t getSeed() const               = 0;
     virtual std::vector<WorldPos> stepWater(ChunkPos min_chunk, ChunkPos max_chunk) = 0;
     virtual void applyMods(Chunk* /*chunk*/) const {}
+    // 永続的な松明 (BlockType::Torch) のワールド座標一覧を返す。
+    // ChunkManager がこれらを含むチャンクを LRU から保護するために使う。
+    // デフォルト実装は空配列を返す (テスト/モック向け)。
+    virtual std::vector<WorldPos> torchPositions() const { return {}; }
 };

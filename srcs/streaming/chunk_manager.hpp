@@ -38,6 +38,10 @@ private:
     void loadRadius(ChunkPos center);
     void uploadPending(int max_per_frame);
     void evictIfOverBudget();
+    // 松明を含むチャンクを毎フレーム LRU の先頭に touch することで、
+    // プレイヤーが遠くへ行っても evict されず、戻ったときに即座に光源が機能する。
+    // 未ロードの松明チャンクは gen_queue_ にも投入して背景生成を促す。
+    void pinTorchChunks();
     void buildMesh(Chunk* chunk);
     void drainTerrainDone();
     void processMeshQueue(int max_per_frame);

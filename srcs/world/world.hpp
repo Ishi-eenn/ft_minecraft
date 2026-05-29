@@ -37,7 +37,7 @@ public:
 
     // mods_ をスキャンして全松明（BlockType::Torch）のワールド座標を返す。
     // 配置/破壊は mods_ に記録されるためこれだけ見れば十分。
-    std::vector<WorldPos> torchPositions() const;
+    std::vector<WorldPos> torchPositions() const override;
 
 private:
     static int floorDiv(int a, int b);
