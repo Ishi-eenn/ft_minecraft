@@ -1,113 +1,115 @@
 #!/usr/bin/env bash
 # download_assets.sh
 #
-# 音声アセットをダウンロードする。
-# リポジトリ合計が 42 MB を超えるため、音声ファイルは Git 管理外。
-#
 # 使い方:
-#   bash scripts/download_assets.sh          # 本番ファイルをダウンロード
-#   bash scripts/download_assets.sh --placeholder  # 無音ファイルを生成（開発用）
-#
-# 実際のファイルをホストする場合:
-#   AUDIO_BASE_URL を変更し、ファイル一覧 (MUSIC / AMBIENT / SE) を更新する。
-#   推奨ホスト: GitHub Releases の tar.gz アーカイブ
+#   bash scripts/download_assets.sh
 
 set -euo pipefail
-
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ASSETS="$REPO_ROOT/assets"
 
-# ── ダウンロード元 URL ────────────────────────────────────────────────────────
-# GitHub Releases にアーカイブをアップロードしたら以下を書き換える。
-# 例: https://github.com/Ishi-eenn/ft_vox/releases/download/v1.0/audio_assets.tar.gz
-AUDIO_ARCHIVE_URL=""
+# =============================================================================
+# ここに URL を書く（ファイルが不要なら "" のままでOK → 無音ファイルで代替）
+# =============================================================================
 
-# ── ファイル一覧 ──────────────────────────────────────────────────────────────
-MUSIC=(
-    plains_bgm desert_bgm tundra_bgm rocky_bgm swamp_bgm
-    mountain_bgm canyon_bgm spring_bgm autumn_bgm
-)
-AMBIENT=(
-    plains desert tundra rocky swamp
-    mountain canyon spring autumn
-)
-SE=(
-    footstep_grass footstep_stone footstep_sand footstep_snow footstep_wood
-    attack hurt swim
-    block_break block_place
-    mob_groan mob_hurt mob_explode
-)
+# ── BGM ──────────────────────────────────────────────────────────────────────
+URL_MUSIC_PLAINS=""
+URL_MUSIC_DESERT=""
+URL_MUSIC_TUNDRA=""
+URL_MUSIC_ROCKY=""
+URL_MUSIC_SWAMP=""
+URL_MUSIC_MOUNTAIN=""
+URL_MUSIC_CANYON=""
+URL_MUSIC_SPRING=""
+URL_MUSIC_AUTUMN=""
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ── アンビエント ──────────────────────────────────────────────────────────────
+URL_AMBIENT_PLAINS=""
+URL_AMBIENT_DESERT=""
+URL_AMBIENT_TUNDRA=""
+URL_AMBIENT_ROCKY=""
+URL_AMBIENT_SWAMP=""
+URL_AMBIENT_MOUNTAIN=""
+URL_AMBIENT_CANYON=""
+URL_AMBIENT_SPRING=""
+URL_AMBIENT_AUTUMN=""
 
-placeholder_mode=false
-if [[ "${1:-}" == "--placeholder" ]]; then
-    placeholder_mode=true
-fi
+# ── SE（効果音） ──────────────────────────────────────────────────────────────
+URL_SE_FOOTSTEP_GRASS=""
+URL_SE_FOOTSTEP_STONE=""
+URL_SE_FOOTSTEP_SAND=""
+URL_SE_FOOTSTEP_SNOW=""
+URL_SE_FOOTSTEP_WOOD=""
+URL_SE_ATTACK=""
+URL_SE_HURT=""
+URL_SE_SWIM=""
+URL_SE_BLOCK_BREAK=""
+URL_SE_BLOCK_PLACE=""
+URL_SE_MOB_GROAN=""
+URL_SE_MOB_HURT=""
+URL_SE_MOB_EXPLODE=""
 
-# プレースホルダーモード: 無音 WAV を生成して終了
-if $placeholder_mode; then
-    echo "[download_assets] --placeholder: generating silent WAV files..."
-    ASSETS="$ASSETS" bash "$REPO_ROOT/scripts/gen_placeholder_assets.sh"
-    exit 0
-fi
+# =============================================================================
+# 以下は変更不要
+# =============================================================================
 
-# URL が未設定なら placeholder にフォールバック
-if [[ -z "$AUDIO_ARCHIVE_URL" ]]; then
-    echo "[download_assets] AUDIO_ARCHIVE_URL is not set."
-    echo "  → Falling back to placeholder generation."
-    echo "  To use real audio files, set AUDIO_ARCHIVE_URL in this script"
-    echo "  or run:  bash scripts/download_assets.sh --placeholder"
-    echo ""
-    ASSETS="$ASSETS" bash "$REPO_ROOT/scripts/gen_placeholder_assets.sh"
-    exit 0
-fi
+mkdir -p \
+    "$REPO_ROOT/assets/music" \
+    "$REPO_ROOT/assets/sounds/ambient" \
+    "$REPO_ROOT/assets/sounds"
 
-# ── アーカイブをダウンロードして展開 ─────────────────────────────────────────
-TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
-
-echo "[download_assets] Downloading $AUDIO_ARCHIVE_URL ..."
-
-if command -v curl &>/dev/null; then
-    curl -L --progress-bar -o "$TMP_DIR/audio_assets.tar.gz" "$AUDIO_ARCHIVE_URL"
-elif command -v wget &>/dev/null; then
-    wget -q --show-progress -O "$TMP_DIR/audio_assets.tar.gz" "$AUDIO_ARCHIVE_URL"
-else
-    echo "ERROR: curl or wget is required." >&2
-    exit 1
-fi
-
-echo "[download_assets] Extracting..."
-tar -xzf "$TMP_DIR/audio_assets.tar.gz" -C "$TMP_DIR"
-
-# アーカイブ内の *.ogg / *.wav をそれぞれ正しいディレクトリへコピー
-mkdir -p "$ASSETS/music" "$ASSETS/sounds/ambient"
-
-install_if_found() {
-    local src="$1" dst_dir="$2"
-    if [[ -f "$src" ]]; then
-        cp "$src" "$dst_dir/"
-        echo "  installed  $(basename "$src")"
+fetch() {
+    local url="$1" dst="$2"
+    [[ -z "$url" ]] && return 0          # URL 未設定はスキップ
+    [[ -f "$dst" ]] && return 0          # 既にあればスキップ
+    echo "  downloading $(basename "$dst") ..."
+    if command -v curl &>/dev/null; then
+        curl -fsSL -o "$dst" "$url"
+    else
+        wget -q -O "$dst" "$url"
     fi
 }
 
-for name in "${MUSIC[@]}"; do
-    for ext in ogg wav; do
-        install_if_found "$TMP_DIR/${name}.${ext}" "$ASSETS/music"
-    done
-done
-for name in "${AMBIENT[@]}"; do
-    for ext in ogg wav; do
-        install_if_found "$TMP_DIR/ambient/${name}.${ext}" "$ASSETS/sounds/ambient"
-    done
-done
-for name in "${SE[@]}"; do
-    for ext in ogg wav; do
-        install_if_found "$TMP_DIR/${name}.${ext}" "$ASSETS/sounds"
-    done
-done
+# BGM
+fetch "$URL_MUSIC_PLAINS"    "$REPO_ROOT/assets/music/plains_bgm.ogg"
+fetch "$URL_MUSIC_DESERT"    "$REPO_ROOT/assets/music/desert_bgm.ogg"
+fetch "$URL_MUSIC_TUNDRA"    "$REPO_ROOT/assets/music/tundra_bgm.ogg"
+fetch "$URL_MUSIC_ROCKY"     "$REPO_ROOT/assets/music/rocky_bgm.ogg"
+fetch "$URL_MUSIC_SWAMP"     "$REPO_ROOT/assets/music/swamp_bgm.ogg"
+fetch "$URL_MUSIC_MOUNTAIN"  "$REPO_ROOT/assets/music/mountain_bgm.ogg"
+fetch "$URL_MUSIC_CANYON"    "$REPO_ROOT/assets/music/canyon_bgm.ogg"
+fetch "$URL_MUSIC_SPRING"    "$REPO_ROOT/assets/music/spring_bgm.ogg"
+fetch "$URL_MUSIC_AUTUMN"    "$REPO_ROOT/assets/music/autumn_bgm.ogg"
+
+# Ambient
+fetch "$URL_AMBIENT_PLAINS"    "$REPO_ROOT/assets/sounds/ambient/plains.ogg"
+fetch "$URL_AMBIENT_DESERT"    "$REPO_ROOT/assets/sounds/ambient/desert.ogg"
+fetch "$URL_AMBIENT_TUNDRA"    "$REPO_ROOT/assets/sounds/ambient/tundra.ogg"
+fetch "$URL_AMBIENT_ROCKY"     "$REPO_ROOT/assets/sounds/ambient/rocky.ogg"
+fetch "$URL_AMBIENT_SWAMP"     "$REPO_ROOT/assets/sounds/ambient/swamp.ogg"
+fetch "$URL_AMBIENT_MOUNTAIN"  "$REPO_ROOT/assets/sounds/ambient/mountain.ogg"
+fetch "$URL_AMBIENT_CANYON"    "$REPO_ROOT/assets/sounds/ambient/canyon.ogg"
+fetch "$URL_AMBIENT_SPRING"    "$REPO_ROOT/assets/sounds/ambient/spring.ogg"
+fetch "$URL_AMBIENT_AUTUMN"    "$REPO_ROOT/assets/sounds/ambient/autumn.ogg"
+
+# SE
+fetch "$URL_SE_FOOTSTEP_GRASS"  "$REPO_ROOT/assets/sounds/footstep_grass.ogg"
+fetch "$URL_SE_FOOTSTEP_STONE"  "$REPO_ROOT/assets/sounds/footstep_stone.ogg"
+fetch "$URL_SE_FOOTSTEP_SAND"   "$REPO_ROOT/assets/sounds/footstep_sand.ogg"
+fetch "$URL_SE_FOOTSTEP_SNOW"   "$REPO_ROOT/assets/sounds/footstep_snow.ogg"
+fetch "$URL_SE_FOOTSTEP_WOOD"   "$REPO_ROOT/assets/sounds/footstep_wood.ogg"
+fetch "$URL_SE_ATTACK"          "$REPO_ROOT/assets/sounds/attack.ogg"
+fetch "$URL_SE_HURT"            "$REPO_ROOT/assets/sounds/hurt.ogg"
+fetch "$URL_SE_SWIM"            "$REPO_ROOT/assets/sounds/swim.ogg"
+fetch "$URL_SE_BLOCK_BREAK"     "$REPO_ROOT/assets/sounds/block_break.ogg"
+fetch "$URL_SE_BLOCK_PLACE"     "$REPO_ROOT/assets/sounds/block_place.ogg"
+fetch "$URL_SE_MOB_GROAN"       "$REPO_ROOT/assets/sounds/mob_groan.ogg"
+fetch "$URL_SE_MOB_HURT"        "$REPO_ROOT/assets/sounds/mob_hurt.ogg"
+fetch "$URL_SE_MOB_EXPLODE"     "$REPO_ROOT/assets/sounds/mob_explode.ogg"
+
+# URL が空のファイルは無音 WAV で補完
+echo ""
+echo "Generating placeholders for missing files..."
+ASSETS="$REPO_ROOT/assets" bash "$REPO_ROOT/scripts/gen_placeholder_assets.sh"
 
 echo ""
-echo "[download_assets] Done."
-du -sh "$ASSETS/music" "$ASSETS/sounds" 2>/dev/null || true
+echo "Done."
