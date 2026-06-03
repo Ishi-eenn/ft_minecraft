@@ -5,25 +5,39 @@
 #include <cstdio>
 #include <string>
 
-// ── SE path table (relative to assets_root) ──────────────────────────────────
-static const char* kSePaths[] = {
-    "sounds/footstep_grass.ogg",  // FootstepGrass
-    "sounds/footstep_stone.ogg",  // FootstepStone
-    "sounds/footstep_sand.ogg",   // FootstepSand
-    "sounds/footstep_snow.ogg",   // FootstepSnow
-    "sounds/footstep_wood.ogg",   // FootstepWood
-    "sounds/attack.ogg",          // Attack
-    "sounds/hurt.ogg",            // Hurt
-    "sounds/swim.ogg",            // Swim
-    "sounds/block_break.ogg",     // BlockBreak
-    "sounds/block_place.ogg",     // BlockPlace
-    "sounds/mob_groan.ogg",       // MobGroan
-    "sounds/mob_hurt.ogg",        // MobHurt
-    "sounds/mob_explode.ogg",     // MobExplode
+// ── 拡張子なしの SE パス（stems） ────────────────────────────────────────────
+static const char* kSeStems[] = {
+    "sounds/footstep_grass",  // FootstepGrass
+    "sounds/footstep_stone",  // FootstepStone
+    "sounds/footstep_sand",   // FootstepSand
+    "sounds/footstep_snow",   // FootstepSnow
+    "sounds/footstep_wood",   // FootstepWood
+    "sounds/attack",          // Attack
+    "sounds/hurt",            // Hurt
+    "sounds/swim",            // Swim
+    "sounds/block_break",     // BlockBreak
+    "sounds/block_place",     // BlockPlace
+    "sounds/mob_groan",       // MobGroan
+    "sounds/mob_hurt",        // MobHurt
+    "sounds/mob_explode",     // MobExplode
 };
-static_assert(sizeof(kSePaths) / sizeof(kSePaths[0]) ==
+static_assert(sizeof(kSeStems) / sizeof(kSeStems[0]) ==
               static_cast<std::size_t>(SoundEvent::COUNT),
-              "kSePaths length mismatch");
+              "kSeStems length mismatch");
+
+// ogg / mp3 / wav / flac のどれかが存在するパスを返す。
+// 見つからなければ stem + ".ogg" を返す（AudioManager が警告を出す）。
+static std::string resolveAudioPath(const std::string& stem) {
+    static const char* kExts[] = {".ogg", ".mp3", ".wav", ".flac"};
+    for (const char* ext : kExts) {
+        std::string candidate = stem + ext;
+        if (FILE* f = std::fopen(candidate.c_str(), "rb")) {
+            std::fclose(f);
+            return candidate;
+        }
+    }
+    return stem + ".ogg";
+}
 
 // ── BGM slot (one of two ping-pong slots) ─────────────────────────────────────
 struct BgmSlot {
@@ -257,7 +271,7 @@ void AudioManager::playBgm(const std::string& path, float fade_duration) {
         d.bgm[next].playing     = false;
     }
 
-    std::string full = d.assets_root + "/" + path;
+    std::string full = resolveAudioPath(d.assets_root + "/" + path);
     ma_uint32 flags  = MA_SOUND_FLAG_STREAM | MA_SOUND_FLAG_NO_SPATIALIZATION;
     if (ma_sound_init_from_file(&d.engine, full.c_str(), flags,
                                 &d.bgm_group, nullptr,
@@ -323,7 +337,7 @@ void AudioManager::playAmbient(const std::string& path, float fade_in) {
         d.ambient_fade_timer = 0.0f;
     }
 
-    std::string full = d.assets_root + "/" + path;
+    std::string full = resolveAudioPath(d.assets_root + "/" + path);
     ma_uint32 flags  = MA_SOUND_FLAG_STREAM | MA_SOUND_FLAG_NO_SPATIALIZATION;
     if (ma_sound_init_from_file(&d.engine, full.c_str(), flags,
                                 &d.ambient_group, nullptr,
@@ -359,7 +373,7 @@ void AudioManager::playSe(SoundEvent event) {
     int idx = static_cast<int>(event);
     if (idx < 0 || idx >= static_cast<int>(SoundEvent::COUNT)) return;
 
-    std::string full = d.assets_root + "/" + kSePaths[idx];
+    std::string full = resolveAudioPath(d.assets_root + "/" + kSeStems[idx]);
     if (ma_engine_play_sound(&d.engine, full.c_str(), &d.se_group) != MA_SUCCESS)
         fprintf(stderr, "[Audio] playSe failed: %s\n", full.c_str());
 }
@@ -381,7 +395,7 @@ void AudioManager::playSe3D(SoundEvent event, float x, float y, float z,
     int idx = static_cast<int>(event);
     if (idx < 0 || idx >= static_cast<int>(SoundEvent::COUNT)) return;
 
-    std::string full = d.assets_root + "/" + kSePaths[idx];
+    std::string full = resolveAudioPath(d.assets_root + "/" + kSeStems[idx]);
     // Load without streaming (SE are short) and with spatialization enabled
     if (ma_sound_init_from_file(&d.engine, full.c_str(), 0,
                                 &d.se_group, nullptr,

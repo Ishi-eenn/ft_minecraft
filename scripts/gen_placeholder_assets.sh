@@ -22,8 +22,11 @@ import sys
 def make_wav(path, duration_s: float, sample_rate: int = 44100, channels: int = 1):
     """Generate a minimal silent PCM WAV file."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    if os.path.exists(path):
-        return  # skip existing files
+    # 拡張子違いでも存在すればスキップ
+    stem = os.path.splitext(path)[0]
+    for ext in ('.ogg', '.mp3', '.wav', '.flac'):
+        if os.path.exists(stem + ext):
+            return
 
     num_samples = int(sample_rate * duration_s * channels)
     pcm = bytes(num_samples * 2)  # 16-bit silence

@@ -6,15 +6,16 @@
 void BiomeAudioSystem::init(AudioManager& mgr) {
     mgr_ = &mgr;
 
-    registerBiome("PLAINS",   {"music/plains_bgm.ogg",   "sounds/ambient/plains.ogg"});
-    registerBiome("DESERT",   {"music/desert_bgm.ogg",   "sounds/ambient/desert.ogg"});
-    registerBiome("TUNDRA",   {"music/tundra_bgm.ogg",   "sounds/ambient/tundra.ogg"});
-    registerBiome("ROCKY",    {"music/rocky_bgm.ogg",    "sounds/ambient/rocky.ogg"});
-    registerBiome("SWAMP",    {"music/swamp_bgm.ogg",    "sounds/ambient/swamp.ogg"});
-    registerBiome("MOUNTAIN", {"music/mountain_bgm.ogg", "sounds/ambient/mountain.ogg"});
-    registerBiome("CANYON",   {"music/canyon_bgm.ogg",   "sounds/ambient/canyon.ogg"});
-    registerBiome("SPRING",   {"music/spring_bgm.ogg",   "sounds/ambient/spring.ogg"});
-    registerBiome("AUTUMN",   {"music/autumn_bgm.ogg",   "sounds/ambient/autumn.ogg"});
+    // 拡張子は AudioManager 側で自動解決（ogg/mp3/wav/flac に対応）
+    registerBiome("PLAINS",   {"music/plains_bgm",   "sounds/ambient/plains"});
+    registerBiome("DESERT",   {"music/desert_bgm",   "sounds/ambient/desert"});
+    registerBiome("TUNDRA",   {"music/tundra_bgm",   "sounds/ambient/tundra"});
+    registerBiome("ROCKY",    {"music/rocky_bgm",    "sounds/ambient/rocky"});
+    registerBiome("SWAMP",    {"music/swamp_bgm",    "sounds/ambient/swamp"});
+    registerBiome("MOUNTAIN", {"music/mountain_bgm", "sounds/ambient/mountain"});
+    registerBiome("CANYON",   {"music/canyon_bgm",   "sounds/ambient/canyon"});
+    registerBiome("SPRING",   {"music/spring_bgm",   "sounds/ambient/spring"});
+    registerBiome("AUTUMN",   {"music/autumn_bgm",   "sounds/ambient/autumn"});
 }
 
 void BiomeAudioSystem::registerBiome(const std::string& biome_name,
