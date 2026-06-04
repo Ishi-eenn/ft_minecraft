@@ -220,6 +220,7 @@ struct Engine::Impl {
     BiomeAudioSystem biome_audio;
     float footstep_timer = 0.0f;
     float swim_timer     = 0.0f;
+    float groan_timer    = 0.0f;
 
     // Mobs
     MobManager    mob_mgr;
@@ -692,9 +693,14 @@ void Engine::run() {
                                     hit.bx, hit.by, hit.bz,
                                     static_cast<uint8_t>(BlockType::Air));
                         } else {
-                            impl_->mob_mgr.playerMeleeAttack(
+                            int hit_idx = impl_->mob_mgr.playerMeleeAttack(
                                 pos.x, pos.y, pos.z, front.x, front.z);
                             impl_->audio_mgr.playSe(SoundEvent::Attack);
+                            if (hit_idx >= 0) {
+                                const Zombie& hz = impl_->mob_mgr.zombies()[hit_idx];
+                                impl_->audio_mgr.playSe3D(SoundEvent::MobHurt,
+                                    hz.x, hz.y + 0.9f, hz.z, 32.0f);
+                            }
                         }
                     }
 
@@ -873,12 +879,31 @@ void Engine::run() {
             if (is_mob_host) {
                 auto explosions = impl_->mob_mgr.consumeExplosions();
                 for (const MobExplosion& ex : explosions) {
+                    impl_->audio_mgr.playSe3D(SoundEvent::MobExplode,
+                        ex.x, ex.y, ex.z, 64.0f);
                     applyMobExplosion(
                         ex, impl_->world, *impl_->chunk_mgr,
                         impl_->multiplayer ? &impl_->net_client : nullptr);
                 }
             }
             applyPlayerDamage(dmg, "mob");
+
+            // Mob groan: one nearby Chase/Attack zombie emits a sound periodically
+            impl_->groan_timer -= dt;
+            if (impl_->groan_timer <= 0.0f) {
+                impl_->groan_timer = 3.5f;
+                for (const Zombie& z : impl_->mob_mgr.zombies()) {
+                    if (!z.alive()) continue;
+                    if (z.state != Zombie::State::Chase &&
+                        z.state != Zombie::State::Attack) continue;
+                    float dx = z.x - ppos.x, dz = z.z - ppos.z;
+                    if (dx*dx + dz*dz < 40.0f * 40.0f) {
+                        impl_->audio_mgr.playSe3D(SoundEvent::MobGroan,
+                            z.x, z.y + 0.9f, z.z, 40.0f);
+                        break;
+                    }
+                }
+            }
         }
 
         // ── 矢の物理更新（命中判定はホストのみ実行） ─────────────────────────
