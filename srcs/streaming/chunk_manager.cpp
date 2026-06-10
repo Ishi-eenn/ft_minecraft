@@ -379,3 +379,4 @@ std::vector<Chunk*> ChunkManager::getVisibleChunks(const Frustum& frustum) {
     });
 
     return result;
+}
