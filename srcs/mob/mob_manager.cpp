@@ -87,18 +87,38 @@ int MobManager::findGroundY(float x, float z, const World& world) const {
     return -1;
 }
 
+// ── Target selection ──────────────────────────────────────────────────────────
+// 最寄りのプレイヤー（水平距離）を追跡対象に選ぶ。
+// マルチプレイでは全プレイヤーが等しく追われる（ホスト専用ではない）。
+int MobManager::nearestTarget(const Zombie& z,
+                              const std::vector<MobTarget>& targets) {
+    int   best   = -1;
+    float best_d = 1e30f;
+    for (int i = 0; i < (int)targets.size(); ++i) {
+        const float dx = targets[i].x - z.x;
+        const float dz = targets[i].z - z.z;
+        const float d  = dx * dx + dz * dz;
+        if (d < best_d) {
+            best_d = d;
+            best   = i;
+        }
+    }
+    return best;
+}
+
 // ── Per-zombie update ─────────────────────────────────────────────────────────
-float MobManager::updateZombie(Zombie& z, float dt,
-                               float px, float py, float pz,
-                               const std::function<bool(int,int,int)>& isSolid) {
+void MobManager::updateZombie(Zombie& z, float dt,
+                              const std::vector<MobTarget>& targets,
+                              const std::function<bool(int,int,int)>& isSolid,
+                              std::vector<float>& out_damage) {
+    const int ti = nearestTarget(z, targets);
     // Player feet position
-    const float pfx = px;
-    (void)py;
-    const float pfz = pz;
+    const float pfx = (ti >= 0) ? targets[ti].x : z.x;
+    const float pfz = (ti >= 0) ? targets[ti].z : z.z;
 
     const float dx     = pfx - z.x;
     const float dz     = pfz - z.z;
-    const float horiz  = std::sqrt(dx * dx + dz * dz);
+    const float horiz  = (ti >= 0) ? std::sqrt(dx * dx + dz * dz) : 1e30f;
 
     // ── State transitions ─────────────────────────────────────────────────
     z.state_timer += dt;
@@ -157,24 +177,25 @@ float MobManager::updateZombie(Zombie& z, float dt,
 
     // ── Attack cooldown ───────────────────────────────────────────────────
     if (z.attack_cooldown > 0) z.attack_cooldown -= dt;
-    if (z.state == Zombie::State::Attack && z.attack_cooldown <= 0) {
+    if (z.state == Zombie::State::Attack && z.attack_cooldown <= 0 && ti >= 0) {
         z.attack_cooldown = ATTACK_PERIOD;
-        return ATTACK_DAMAGE;
+        out_damage[ti] += ATTACK_DAMAGE;
     }
-    return 0.0f;
 }
 
-float MobManager::updateCreeper(Zombie& z, float dt,
-                                float px, float py, float pz,
-                                const std::function<bool(int,int,int)>& isSolid) {
-    const float pfx = px;
-    const float pfy = py - PLAYER_EYE_H;
-    const float pfz = pz;
+void MobManager::updateCreeper(Zombie& z, float dt,
+                               const std::vector<MobTarget>& targets,
+                               const std::function<bool(int,int,int)>& isSolid,
+                               std::vector<float>& out_damage) {
+    const int ti = nearestTarget(z, targets);
+    const float pfx = (ti >= 0) ? targets[ti].x : z.x;
+    const float pfy = (ti >= 0) ? targets[ti].y - PLAYER_EYE_H : z.y;
+    const float pfz = (ti >= 0) ? targets[ti].z : z.z;
 
     const float dx     = pfx - z.x;
     const float dy     = pfy - z.y;
     const float dz     = pfz - z.z;
-    const float horiz  = std::sqrt(dx * dx + dz * dz);
+    const float horiz  = (ti >= 0) ? std::sqrt(dx * dx + dz * dz) : 1e30f;
     const float ydiff  = std::fabs(dy);
     const bool fuse_close = horiz < CREEPER_FUSE_RANGE &&
                             ydiff < CREEPER_FUSE_Y_RANGE;
@@ -244,12 +265,17 @@ float MobManager::updateCreeper(Zombie& z, float dt,
         explosions_.push_back({z.x, z.y + 0.85f, z.z, CREEPER_BLOCK_RADIUS});
         z.health = 0.0f;
 
-        const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-        if (dist >= CREEPER_DAMAGE_RADIUS) return 0.0f;
-        const float t = 1.0f - dist / CREEPER_DAMAGE_RADIUS;
-        return CREEPER_MAX_DAMAGE * t * t;
+        // 爆発は追跡対象に限らず、半径内の全プレイヤーにダメージを与える
+        for (int i = 0; i < (int)targets.size(); ++i) {
+            const float ex = targets[i].x - z.x;
+            const float ey = (targets[i].y - PLAYER_EYE_H) - z.y;
+            const float ez = targets[i].z - z.z;
+            const float dist = std::sqrt(ex * ex + ey * ey + ez * ez);
+            if (dist >= CREEPER_DAMAGE_RADIUS) continue;
+            const float t = 1.0f - dist / CREEPER_DAMAGE_RADIUS;
+            out_damage[i] += CREEPER_MAX_DAMAGE * t * t;
+        }
     }
-    return 0.0f;
 }
 
 // ── Spawning ──────────────────────────────────────────────────────────────────
@@ -283,32 +309,35 @@ void MobManager::trySpawn(float px, float pz,
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
-float MobManager::update(float dt,
-                          float px, float py, float pz,
-                          float time_of_day,
-                          const std::function<bool(int,int,int)>& isSolid,
-                          const World& world) {
+void MobManager::update(float dt,
+                        const std::vector<MobTarget>& targets,
+                        float time_of_day,
+                        const std::function<bool(int,int,int)>& isSolid,
+                        const World& world,
+                        std::vector<float>& out_damage) {
+    out_damage.assign(targets.size(), 0.0f);
+    if (targets.empty()) return;
+
     spawn_timer_ -= dt;
     if (spawn_timer_ <= 0) {
         spawn_timer_ = SPAWN_INTERVAL;
-        trySpawn(px, pz, world, time_of_day);
+        // スポーン中心はランダムに選んだプレイヤー（全員の周囲に均等に湧かせる）
+        const MobTarget& t = targets[rand() % targets.size()];
+        trySpawn(t.x, t.z, world, time_of_day);
     }
 
-    float damage = 0;
     for (auto& z : zombies_) {
         if (!z.alive()) continue;
         if (z.type == MobType::Creeper)
-            damage += updateCreeper(z, dt, px, py, pz, isSolid);
+            updateCreeper(z, dt, targets, isSolid, out_damage);
         else
-            damage += updateZombie(z, dt, px, py, pz, isSolid);
+            updateZombie(z, dt, targets, isSolid, out_damage);
     }
 
     zombies_.erase(
         std::remove_if(zombies_.begin(), zombies_.end(),
                        [](const Zombie& z) { return !z.alive(); }),
         zombies_.end());
-
-    return damage;
 }
 
 std::vector<MobExplosion> MobManager::consumeExplosions() {

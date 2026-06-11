@@ -35,26 +35,7 @@ if(FT_MINECRAFT_FETCH_DEPS)
     GIT_SHALLOW TRUE
   )
 
-  FetchContent_Declare(
-    fastnoiselite
-    GIT_REPOSITORY https://github.com/Auburn/FastNoiseLite.git
-    GIT_TAG v1.1.1
-    GIT_SHALLOW TRUE
-  )
-
   FetchContent_MakeAvailable(glfw glm)
-
-  FetchContent_GetProperties(fastnoiselite)
-  if(NOT fastnoiselite_POPULATED)
-    FetchContent_Populate(fastnoiselite)
-  endif()
-
-  add_library(ft_minecraft_fastnoise INTERFACE)
-  target_include_directories(
-    ft_minecraft_fastnoise
-    INTERFACE
-      ${fastnoiselite_SOURCE_DIR}/Cpp
-  )
 
   # ── miniaudio (single-header audio engine) ─────────────────────────────────
   FetchContent_Declare(
@@ -139,7 +120,6 @@ target_link_libraries(
     OpenGL::GL
     glfw
     glm::glm
-    ft_minecraft_fastnoise
     Threads::Threads
     ${CMAKE_DL_LIBS}  # miniaudio uses dlopen on Linux for audio backends
     m                 # math library (miniaudio, stb_vorbis)

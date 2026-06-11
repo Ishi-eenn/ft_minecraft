@@ -14,6 +14,7 @@ enum class PacketType : uint8_t {
     MobUpdate   = 7,   // C(host)→S; S→C relay to others
     DragonSpawn  = 8,  // 任意のC→S; S→C broadcast: ドラゴン召喚イベント
     DragonUpdate = 9,  // C(host)→S; S→C relay to others: ドラゴンの状態
+    PlayerDamage = 10, // C(host)→S; S→該当クライアントへ転送: モブによるダメージ
 };
 
 #pragma pack(push, 1)
@@ -75,6 +76,13 @@ struct PktDragonState {
     float   yaw, pitch;
     float   wing_phase;
     float   health;
+};
+
+// PlayerDamage: ホストが計算したモブ→プレイヤーのダメージ。
+// サーバーは target_id のクライアントにのみ転送し、受信側が自分の HP に適用する。
+struct PktPlayerDamage {
+    uint8_t target_id;
+    float   damage;
 };
 
 #pragma pack(pop)

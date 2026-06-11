@@ -72,6 +72,8 @@ public:
 
     // Shadow mapping
     void updateShadowMatrix(float px, float py, float pz);
+    // 光源空間行列 (lightProj × lightView)。シャドウパスのカリングに使う。
+    const float* lightSpaceMatrix() const { return light_space_mat_; }
     void beginShadowPass();
     void endShadowPass();
     void drawChunkShadow(const Chunk* chunk);

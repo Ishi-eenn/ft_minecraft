@@ -87,8 +87,10 @@ void NetworkClient::handlePacket(PacketType type, const uint8_t* payload,
         rp.x       = pkt.x;  rp.y     = pkt.y;  rp.z   = pkt.z;
         rp.yaw     = pkt.yaw;  rp.pitch = pkt.pitch;
         rp.health  = pkt.health;
-        if ((pkt.state_flags & 0x02u) && !(rp.state_flags & 0x02u))
+        if ((pkt.state_flags & 0x02u) && !(rp.state_flags & 0x02u)) {
             rp.attack_timer = 0.28f;
+            rp.attack_sound_pending = true;  // engine 側で 3D 攻撃音を再生
+        }
         rp.state_flags = pkt.state_flags;
         break;
     }
@@ -177,6 +179,17 @@ void NetworkClient::handlePacket(PacketType type, const uint8_t* payload,
         ev.dragon_pitch      = pkt.pitch;
         ev.dragon_wing_phase = pkt.wing_phase;
         ev.dragon_health     = pkt.health;
+        out.push_back(ev);
+        break;
+    }
+    case PacketType::PlayerDamage: {
+        if (size < sizeof(PktPlayerDamage)) break;
+        PktPlayerDamage pkt;
+        std::memcpy(&pkt, payload, sizeof(pkt));
+        NetworkEvent ev;
+        ev.kind      = NetworkEvent::Kind::PlayerDamage;
+        ev.player_id = pkt.target_id;
+        ev.damage    = pkt.damage;
         out.push_back(ev);
         break;
     }
