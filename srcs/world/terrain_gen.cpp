@@ -708,23 +708,21 @@ static VillageMat getVillageMat(float wT) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// computeFootprintBase() — 建物フットプリント内の最低地形高さを計算
+// computeFootprintBase() — 建物フットプリントの地形平均高さを計算
 //
-// フットプリントの9点（四隅・辺中央・中心）をサンプリングして最低値を返す。
-// 建物はこの高さに配置することで「最も低い地面」に合わせて立つ。
+// フットプリントの9点（四隅・辺中央・中心）をサンプリングして平均値を返す。
+// min ではなく平均を使うことで、斜面の中央に建物が配置される。
+// 片側が深く掘られたり、もう片側が高く盛られすぎる問題を軽減する。
 // ─────────────────────────────────────────────────────────────────────────────
 static int computeFootprintBase(const NoiseGen& noise,
                                  int origin_wx, int origin_wz, int fw, int fd) {
-    int min_h = CHUNK_SIZE_Y;
     int xs[3] = {0, fw / 2, fw - 1};
     int zs[3] = {0, fd / 2, fd - 1};
-    for (int xi = 0; xi < 3; ++xi) {
-        for (int zi = 0; zi < 3; ++zi) {
-            int h = computeTerrainHeight(noise, origin_wx + xs[xi], origin_wz + zs[zi]);
-            if (h < min_h) min_h = h;
-        }
-    }
-    return min_h;
+    int sum = 0;
+    for (int xi = 0; xi < 3; ++xi)
+        for (int zi = 0; zi < 3; ++zi)
+            sum += computeTerrainHeight(noise, origin_wx + xs[xi], origin_wz + zs[zi]);
+    return sum / 9;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -745,8 +743,11 @@ static void levelBuilding(Chunk& chunk, const NoiseGen& noise,
             // 地形が base_y より高い場合: 上のブロックを掘り下げる
             for (int y = base_y + 1; y <= terrain_y + 1; ++y)
                 setBlockWorld(chunk, chunk_wx, chunk_wz, wx, y, wz, BlockType::Air);
-            // 地形が base_y より低い場合: 石の土台で埋める
-            for (int y = terrain_y + 1; y <= base_y; ++y)
+            // base_y から16ブロック下まで石で埋める
+            // terrain_y+1 からではなく固定深さから埋めることで、
+            // 洞窟・川による空洞が床の直下にある場合も塞ぐ。
+            int fill_bottom = std::max(1, base_y - 16);
+            for (int y = fill_bottom; y <= base_y; ++y)
                 setBlockWorld(chunk, chunk_wx, chunk_wz, wx, y, wz, BlockType::Stone);
         }
     }
@@ -1222,6 +1223,7 @@ static void renderVillage(Chunk& chunk, const NoiseGen& noise,
         if (b.oz + fd <= chunk_wz || b.oz >= chunk_wz + CHUNK_SIZE_Z) continue;
 
         int bb = computeFootprintBase(noise, b.ox, b.oz, fw, fd);
+        if (bb < SEA_LEVEL + 2) continue;
         levelBuilding(chunk, noise, chunk_wx, chunk_wz, b.ox, b.oz, fw, fd, bb);
 
         // ドア位置から親道路中点へパス接続
