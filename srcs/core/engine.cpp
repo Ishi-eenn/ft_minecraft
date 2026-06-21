@@ -850,8 +850,14 @@ void Engine::run() {
             impl_->attack_sync_timer -= dt;
         if (impl_->death_sync_timer > 0.0f)
             impl_->death_sync_timer -= dt;
-        const bool is_mob_host = !impl_->multiplayer ||
-                                  impl_->net_client.playerId() == 1;
+        bool is_mob_host = !impl_->multiplayer;
+        if (!is_mob_host) {
+            const uint8_t my_id = impl_->net_client.playerId();
+            is_mob_host = true;
+            for (const auto& [id, rp] : impl_->net_client.remotePlayers()) {
+                if (id < my_id) { is_mob_host = false; break; }
+            }
+        }
         if (impl_->multiplayer) {
             impl_->net_pos_timer += dt;
             if (impl_->net_pos_timer >= 0.05f) {   // ~20 Hz
