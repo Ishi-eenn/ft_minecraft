@@ -208,6 +208,16 @@ void NetworkClient::handlePacket(PacketType type, const uint8_t* payload,
         out.push_back(ev);
         break;
     }
+    case PacketType::DragonHit: {
+        if (size < sizeof(PktDragonHit)) break;
+        PktDragonHit pkt;
+        std::memcpy(&pkt, payload, sizeof(pkt));
+        NetworkEvent ev;
+        ev.kind              = NetworkEvent::Kind::DragonHit;
+        ev.dragon_hit_damage = pkt.damage;
+        out.push_back(ev);
+        break;
+    }
     default:
         break;
     }

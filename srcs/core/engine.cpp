@@ -745,6 +745,12 @@ void Engine::run() {
                             // ドラゴンを優先 (より遠くから当たる)。当たらなければゾンビ近接。
                             bool dragon_hit = impl_->dragon_mgr.playerMeleeAttack(
                                 pos.x, pos.y, pos.z, front.x, front.y, front.z);
+                            // マルチプレイ: 命中を mob_host に通知して権威的ダメージを適用させる
+                            if (dragon_hit && impl_->multiplayer) {
+                                PktDragonHit pkt{DRAGON_MELEE_DAMAGE};
+                                impl_->net_client.sendRaw(PacketType::DragonHit,
+                                                           &pkt, sizeof(pkt));
+                            }
                             impl_->audio_mgr.playSe(SoundEvent::Attack);
                             if (!dragon_hit) {
                                 int hit_idx = impl_->mob_mgr.playerMeleeAttack(
@@ -927,6 +933,12 @@ void Engine::run() {
                         impl_->dragon_mgr.spawnFireballNet(
                             ev.fb_x, ev.fb_y, ev.fb_z,
                             ev.fb_vx, ev.fb_vy, ev.fb_vz);
+                    }
+                } else if (ev.kind == NetworkEvent::Kind::DragonHit) {
+                    // mob_host のみが権威的にダメージを適用する。
+                    // 非ホストはローカルで楽観的に適用済みなので無視する。
+                    if (is_mob_host) {
+                        impl_->dragon_mgr.applyDamage(ev.dragon_hit_damage);
                     }
                 }
             }

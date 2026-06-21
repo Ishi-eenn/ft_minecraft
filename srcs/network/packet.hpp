@@ -16,6 +16,7 @@ enum class PacketType : uint8_t {
     DragonUpdate = 9,  // C(host)→S; S→C relay to others: ドラゴンの状態
     PlayerDamage = 10, // C(host)→S; S→該当クライアントへ転送: モブによるダメージ
     DragonFireball = 11, // C(host)→S; S→C relay: ファイアボール発射イベント
+    DragonHit      = 12, // C→S; S→C relay(except sender): プレイヤーがドラゴンに命中
 };
 
 #pragma pack(push, 1)
@@ -85,6 +86,12 @@ struct PktDragonState {
 struct PktDragonFireball {
     float x, y, z;       // 発射位置 (口)
     float vx, vy, vz;    // 速度 (ブロック/秒)
+};
+
+// DragonHit: プレイヤーがドラゴンに命中したことを mob_host に通知する。
+// mob_host はこれを受けて applyDamage() を呼び、次の DragonUpdate で全員に伝播する。
+struct PktDragonHit {
+    float damage;
 };
 
 // PlayerDamage: ホストが計算したモブ→プレイヤーのダメージ。

@@ -232,6 +232,11 @@ void VoxServer::handlePacket(int from_fd, PacketType type,
         broadcast(PacketType::DragonFireball, payload, size, from_fd);
         break;
     }
+    case PacketType::DragonHit: {
+        // いずれかのプレイヤーがドラゴンに命中 → 送信者を除いて全員に中継
+        broadcast(PacketType::DragonHit, payload, size, from_fd);
+        break;
+    }
     case PacketType::PlayerDamage: {
         // ホストが計算したモブダメージを対象プレイヤーにのみ転送
         if (size < sizeof(PktPlayerDamage)) break;

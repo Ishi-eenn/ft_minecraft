@@ -34,6 +34,7 @@ struct NetworkEvent {
         DragonUpdate,
         DragonFireball,
         PlayerDamage,
+        DragonHit,
     } kind;
     uint8_t  player_id  = 0;
     // PlayerDamage
@@ -54,6 +55,8 @@ struct NetworkEvent {
     float    dragon_yaw = 0, dragon_pitch = 0;
     float    dragon_wing_phase = 0;
     float    dragon_health = 0;
+    // DragonHit fields
+    float    dragon_hit_damage = 0.0f;
     // DragonFireball fields (発射位置と速度)
     float    fb_x = 0, fb_y = 0, fb_z = 0;
     float    fb_vx = 0, fb_vy = 0, fb_vz = 0;
