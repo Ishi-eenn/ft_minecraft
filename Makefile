@@ -3,9 +3,9 @@ CONFIGURE := cmake -S . -B $(BUILD_DIR)
 BUILD := cmake --build $(BUILD_DIR)
 RUN_ARGS := $(filter-out run, $(MAKECMDGOALS))
 
-.PHONY: all configure run clean fclean re
+.PHONY: all configure run clean fclean re sound
 
-all: configure
+all: configure sound
 	$(BUILD)
 
 configure:
@@ -21,6 +21,10 @@ fclean: clean
 	rm -f ft_minecraft
 
 re: fclean all
+
+sound:
+	@bash ./scripts/download_assets.sh
+	@bash ./scripts/gen_placeholder_assets.sh
 
 %:
 	@:
