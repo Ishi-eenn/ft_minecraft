@@ -59,6 +59,11 @@ public:
                     const float* view4x4, const float* proj4x4);
     void drawDragon(const EnderDragon& dragon,
                     const float* view4x4, const float* proj4x4);
+    // ドラゴンのファイアボール (紫の火球) とブレス雲 (残留ダメージ領域) を描画。
+    // 雲はドラゴン死亡後も残るため drawDragon とは独立に毎フレーム呼ぶ。
+    void drawDragonEffects(const std::vector<DragonFireball>& fireballs,
+                           const std::vector<DragonBreathCloud>& clouds,
+                           const float* view4x4, const float* proj4x4);
     void drawBossBar(float health, float max_health);
     void endFrame() override;
     void onResize(int w, int h) override;
@@ -72,6 +77,8 @@ public:
 
     // Shadow mapping
     void updateShadowMatrix(float px, float py, float pz);
+    // 光源空間行列 (lightProj × lightView)。シャドウパスのカリングに使う。
+    const float* lightSpaceMatrix() const { return light_space_mat_; }
     void beginShadowPass();
     void endShadowPass();
     void drawChunkShadow(const Chunk* chunk);

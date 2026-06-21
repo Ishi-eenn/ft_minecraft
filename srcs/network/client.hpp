@@ -18,6 +18,10 @@ struct RemotePlayer {
     float prev_x     = 0.0f;
     float prev_z     = 0.0f;
     bool  initialized = false;
+
+    // Sound state (3D SE: 歩行・攻撃を本人以外にも聞かせる)
+    float footstep_timer = 0.0f;
+    bool  attack_sound_pending = false;
 };
 
 struct NetworkEvent {
@@ -28,8 +32,12 @@ struct NetworkEvent {
         MobUpdate,
         DragonSpawn,
         DragonUpdate,
+        DragonFireball,
+        PlayerDamage,
     } kind;
     uint8_t  player_id  = 0;
+    // PlayerDamage
+    float    damage = 0.0f;
     // BlockChange fields
     int      bx = 0, by = 0, bz = 0;
     uint8_t  block_type = 0;
@@ -46,6 +54,9 @@ struct NetworkEvent {
     float    dragon_yaw = 0, dragon_pitch = 0;
     float    dragon_wing_phase = 0;
     float    dragon_health = 0;
+    // DragonFireball fields (発射位置と速度)
+    float    fb_x = 0, fb_y = 0, fb_z = 0;
+    float    fb_vx = 0, fb_vy = 0, fb_vz = 0;
 };
 
 class NetworkClient {

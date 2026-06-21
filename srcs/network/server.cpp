@@ -227,6 +227,25 @@ void VoxServer::handlePacket(int from_fd, PacketType type,
         broadcast(PacketType::DragonUpdate, payload, size, from_fd);
         break;
     }
+    case PacketType::DragonFireball: {
+        // ホストのドラゴンが発射したファイアボールを他全員に中継
+        broadcast(PacketType::DragonFireball, payload, size, from_fd);
+        break;
+    }
+    case PacketType::PlayerDamage: {
+        // ホストが計算したモブダメージを対象プレイヤーにのみ転送
+        if (size < sizeof(PktPlayerDamage)) break;
+        PktPlayerDamage pkt;
+        std::memcpy(&pkt, payload, sizeof(pkt));
+        for (auto& [fd, c] : clients_) {
+            if (c.id != pkt.target_id) continue;
+            PacketHeader hdr{PacketType::PlayerDamage, sizeof(pkt)};
+            c.sock.sendRaw(&hdr, sizeof(hdr));
+            c.sock.sendRaw(&pkt, sizeof(pkt));
+            break;
+        }
+        break;
+    }
     default:
         break;
     }
