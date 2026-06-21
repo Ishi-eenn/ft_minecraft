@@ -26,6 +26,10 @@ sound:
 	@bash ./scripts/download_assets.sh
 	@bash ./scripts/gen_placeholder_assets.sh
 
+delete-save-data:
+	@rm -rf saves
+	@echo "セーブデータを削除しました。"
+
 help:
 	@echo "使い方:"
 	@echo ""
