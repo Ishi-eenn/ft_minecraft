@@ -16,6 +16,8 @@ static constexpr float ZOMBIE_SPEED   = 0.9f;   // blocks/sec
 static constexpr float DETECT_RANGE  = 16.0f;  // start chasing
 static constexpr float LOSE_RANGE    = 26.0f;  // give up chasing
 static constexpr float ATTACK_RANGE  = 1.5f;   // deal damage
+static constexpr float ATTACK_Y_RANGE = 2.5f;  // vertical reach for zombie attack
+static constexpr float MELEE_Y_RANGE  = 2.5f;  // vertical reach for player melee
 static constexpr float ATTACK_DAMAGE = 2.0f;   // HP per hit
 static constexpr float ATTACK_PERIOD = 1.0f;   // seconds between hits
 static constexpr float PLAYER_EYE_H  = 1.62f;
@@ -114,11 +116,15 @@ void MobManager::updateZombie(Zombie& z, float dt,
     const int ti = nearestTarget(z, targets);
     // Player feet position
     const float pfx = (ti >= 0) ? targets[ti].x : z.x;
+    const float pfy = (ti >= 0) ? targets[ti].y - PLAYER_EYE_H : z.y;
     const float pfz = (ti >= 0) ? targets[ti].z : z.z;
 
     const float dx     = pfx - z.x;
+    const float dy     = pfy - z.y;
     const float dz     = pfz - z.z;
     const float horiz  = (ti >= 0) ? std::sqrt(dx * dx + dz * dz) : 1e30f;
+    // Y range check: player feet must be within zombie's vertical reach
+    const bool y_in_attack = (dy > -1.0f && dy < ZOMBIE_HEIGHT + 0.5f);
 
     // ── State transitions ─────────────────────────────────────────────────
     z.state_timer += dt;
@@ -132,13 +138,13 @@ void MobManager::updateZombie(Zombie& z, float dt,
     case Zombie::State::Chase:
         if (horiz > LOSE_RANGE) {
             z.state = Zombie::State::Idle;
-        } else if (horiz < ATTACK_RANGE) {
+        } else if (horiz < ATTACK_RANGE && y_in_attack) {
             z.state = Zombie::State::Attack;
             z.state_timer = 0;
         }
         break;
     case Zombie::State::Attack:
-        if (horiz > ATTACK_RANGE * 1.6f)
+        if (horiz > ATTACK_RANGE * 1.6f || !y_in_attack)
             z.state = Zombie::State::Chase;
         break;
     case Zombie::State::Fuse:
@@ -179,7 +185,7 @@ void MobManager::updateZombie(Zombie& z, float dt,
     if (z.attack_cooldown > 0) z.attack_cooldown -= dt;
     if (z.state == Zombie::State::Attack && z.attack_cooldown <= 0 && ti >= 0) {
         z.attack_cooldown = ATTACK_PERIOD;
-        out_damage[ti] += ATTACK_DAMAGE;
+        if (y_in_attack) out_damage[ti] += ATTACK_DAMAGE;
     }
 }
 
@@ -351,14 +357,17 @@ int MobManager::playerMeleeAttack(float px, float py, float pz,
     static constexpr float MELEE_RANGE  = 4.0f;
     static constexpr float MELEE_DAMAGE = 5.0f;
 
-    const float pfx = px, pfy = py - PLAYER_EYE_H, pfz = pz;
+    const float pfx = px, pfz = pz;
     float  best_dist = MELEE_RANGE;
     int    best_idx  = -1;
 
     for (int i = 0; i < (int)zombies_.size(); ++i) {
         const Zombie& z = zombies_[i];
         if (!z.alive()) continue;
-        const float dx = z.x - pfx, dz = z.z - pfz;
+        const float dx = z.x - pfx;
+        const float dy = (z.y + ZOMBIE_HEIGHT * 0.5f) - py;  // zombie center vs player eye
+        const float dz = z.z - pfz;
+        if (std::fabs(dy) >= MELEE_Y_RANGE) continue;
         const float dist = std::sqrt(dx * dx + dz * dz);
         if (dist >= best_dist) continue;
         // Must be roughly in front of the player
