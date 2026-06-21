@@ -30,6 +30,10 @@ public:
     // Persistence
     void setSaveDir(const std::string& dir);
     void applyMods(Chunk* chunk) const override;
+    // マルチプレイ用: ローカルセーブの読み書きを完全に無効化し、
+    // 既に読み込んだローカル差分も破棄する。サーバーが権威データなので
+    // クライアントは自分のセーブを混ぜてはいけない。
+    void disablePersistence();
 
     std::unordered_map<ChunkPos, std::unique_ptr<Chunk>, ChunkPosHash>& chunks() {
         return chunks_;

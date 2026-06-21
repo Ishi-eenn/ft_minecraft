@@ -269,6 +269,12 @@ Engine::Engine()  : impl_(std::make_unique<Impl>()) {}
 Engine::~Engine() { shutdown(); }
 
 bool Engine::connectToServer(const char* host, uint16_t port) {
+    // マルチプレイではサーバーが権威データ。init() で読み込んでしまった
+    // ローカルセーブ差分を破棄し、以後ローカルへ保存しないようにする。
+    // これより前にスナップショット（サーバーの全差分）を受信するので、
+    // 必ず connect() より前に呼ぶこと。
+    impl_->world.disablePersistence();
+
     if (!impl_->net_client.connect(host, port)) {
         fprintf(stderr, "[Engine] Failed to connect to %s:%u\n", host, port);
         return false;

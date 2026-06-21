@@ -137,6 +137,15 @@ void World::setSaveDir(const std::string& dir) {
     loadSaveDir();
 }
 
+void World::disablePersistence() {
+    // ローカルセーブから読み込んだ差分を破棄してから保存先を無効化する。
+    // save_dir_ を空にすると saveMods()/loadSaveDir() は早期 return するため、
+    // 以後 mods_ への記録はディスクへ書き出されず、サーバーから受信した差分
+    // だけがメモリ上に存在する状態になる。
+    mods_.clear();
+    save_dir_.clear();
+}
+
 void World::applyMods(Chunk* chunk) const {
     if (!chunk) return;
     auto it = mods_.find(chunk->pos);
